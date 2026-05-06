@@ -1,0 +1,25 @@
+{
+  "name": "godot-mcp-pro-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MCP stdio bridge for the Godot MCP plugin",
+  "type": "module",
+  "main": "./build/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node build/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.20.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  }
+}
