@@ -4,6 +4,60 @@ All notable changes to Godot MCP Pro will be documented in this file.
 
 ---
 
+## v1.14.0 — 2026-05-18
+
+**Feature / Safety** — File-conflict safety overhaul (community contribution)
+
+This release is a coordinated overhaul of how the addon interacts with editor-owned resources. It prevents the "external change" dialog and silent in-memory/disk divergence that could occur when MCP commands wrote scenes, scripts, shaders, or resources while Godot still had them open. Contributed by **[@aallnneess](https://github.com/aallnneess)** (PR #31), with the design and patch reviewed and tested locally with GitHub Copilot using GPT-5.5 xhigh. Reported and validated against the previous v1.13.x behavior.
+
+### Added — safety primitives in `base_command.gd`
+- `guard_offline_scene_save(path)`: blocks `ResourceSaver.save(...)` to a `.tscn`/`.scn` path when that scene is currently open in the editor. Returns a structured conflict error (JSON-RPC code `-32009`) including the path, open-scenes list, and a recovery suggestion.
+- `guard_text_resource_write(path, force)`: blocks writes to a script/shader file that is currently open in Godot's script editor (or, for shaders, currently loaded/cached in `ResourceLoader`). Override with `force=true`.
+- `add_child_with_undo(...)` / `set_property_with_undo(...)`: register live scene mutations through `EditorUndoRedoManager` with correct `add_do_reference` / `add_undo_reference` retention for `Resource` values so they survive GC across the undo history.
+- `get_open_scene_paths()` / `is_scene_path_open()` / `is_active_scene_path()` / `is_text_resource_open_in_script_editor()`: shared checks so per-command code never re-implements the same logic.
+- `normalize_project_path()`: consistent comparison key for `res://`, project-relative, and absolute paths.
+
+### Changed — scene saves go through `EditorInterface`
+- `save_scene`: when the target path matches the active edited scene, calls `EditorInterface.save_scene()`; when the target differs or the active scene has no path yet, calls `EditorInterface.save_scene_as(path)`. Refuses to save an inactive open scene tab. No more silent `ResourceSaver.save` to an open path.
+- `create_scene` / `create_theme` / `edit_resource`: all guarded against accidentally targeting an open scene path.
+
+### Changed — broad cross-scene edits are opt-in
+- **`cross_scene_set_property` defaults to `dry_run=true`** (breaking change). Real writes now require `dry_run=false` **and** `force=true`. The response includes a per-scene `mode` field (`dry_run` / `offline_saved` / `live_open_scene`) and a `skipped_open_scenes` list so callers can see exactly what happened.
+- The active open scene is live-edited via `EditorUndoRedoManager` instead of being offline-overwritten, so changes are visible in the editor and undoable.
+- Inactive open scenes are skipped and reported rather than silently overwritten.
+
+### Changed — live scene mutations participate in UndoRedo
+- `batch_add_nodes`, `batch_set_property`: routed through the shared UndoRedo helpers.
+- `node_commands`: node creation, `set_anchor_preset` (computed on a duplicate Control before applying), signal connect/disconnect, group add/remove — all undoable.
+- `animation_commands`: animation create/remove, track add, and keyframe edits. `_upsert_animation_key` / `_restore_animation_key` give round-trip undo for keyframe edits (including the previously-present-key replacement case) using `is_equal_approx` time matching.
+- `animation_tree_commands`: AnimationTree create, state machine state/transition edits, blend tree node changes, tree parameter edits.
+- `tilemap_commands`: single-cell set, rect fill, and clear capture the affected cells' old state and apply via UndoRedo. Round-trip undoable.
+- `theme_commands`: color, constant, font-size, and stylebox theme overrides; `setup_control` computes target state on a duplicate Control before applying.
+- `audio_commands`, `navigation_commands`, `particle_commands`: node creation and resource assignment go through UndoRedo. Navigation bake also marks the active scene unsaved.
+- `shader_commands`: shader material assignment via `set_property_with_undo`.
+
+### Fixed — open script/shader writes
+- `create_script` / `edit_script`: refuse to write when the target is open in the script editor, unless `force=true` is explicitly passed. Also restricted to `.gd` / `.cs` extensions — scene and shader paths are rejected with a clear suggestion (added in `6d8d650`).
+- `edit_script` now actually implements the 1-based inclusive `start_line` / `end_line` range replacement that the CLI had been advertising. The TypeScript `edit_script` schema and CLI `script edit` both expose the new parameters.
+- `create_shader` / `edit_shader`: same open-file guard, with `force=true` to override.
+- Shader cache refresh fixed: `_refresh_loaded_shader` uses `take_over_path()` + `emit_changed()` to update any cached/live `Shader` resource, replacing the unreliable `Shader.reload_from_file()` call. Live materials referencing the shader now pick up edits immediately.
+
+### Fixed — `execute_editor_script` escape hatch
+- Submitted code is scanned for direct file/resource write APIs (`ResourceSaver.save`, `FileAccess WRITE`, `ProjectSettings.save`, `ConfigFile.save`, `DirAccess` filesystem mutations). If present, the call is refused with a structured conflict error unless `allow_unsafe_editor_io=true` is explicitly passed. Closes the obvious workaround where an AI client could route around the per-command guards by submitting raw script.
+
+### Changed — server schemas
+- `create_script` / `edit_script` / `create_shader` / `edit_shader`: added optional `force` parameter and updated tool descriptions.
+- `cross_scene_set_property`: added optional `dry_run` / `force` parameters and a description that reflects the new dry-run-by-default semantics.
+- `execute_editor_script`: added optional `allow_unsafe_editor_io` parameter.
+- `cli.ts`: `script create` and `script edit` accept `--force` flag.
+
+### Migration notes
+- **Breaking**: scripts/agents that previously relied on `cross_scene_set_property` writing on first call now need to add `dry_run=false force=true` to perform writes. Without those, the call returns a dry-run preview. This is intentional — silent project-wide writes were a footgun.
+- **Soft-breaking**: scripts/agents that previously overwrote open files (scenes, scripts, shaders) without checking now hit a `-32009` conflict error. The fix is to either close the file in the editor first, save through the editor (for scenes), or pass `force=true` (for scripts/shaders, when you've verified no buffer holds unsaved changes).
+- Existing wire-compatible calls that did *not* target open resources continue to work unchanged.
+
+---
+
 ## v1.13.2 — 2026-05-13
 
 **Bug Fix** — Port allocation race when multiple Claude Code sessions start at the same time
