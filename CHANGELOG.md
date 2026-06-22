@@ -4,6 +4,100 @@ All notable changes to Godot MCP Pro will be documented in this file.
 
 ---
 
+## v1.14.1 — 2026-05-24
+
+**Patch** — `assert_node_state` regression fix
+
+### Fixed
+- **`assert_node_state` "Unknown command" regression**: The game-side handler in `mcp_game_inspector_service.gd` had been removed during the v1.7.0 refactor (`4ea3989`, 2026-03-29) that introduced `batch_add_nodes` / `watch_signals` / `setup_control`. The TypeScript server and editor-side GDScript still routed the call, but the runtime match statement no longer recognized it — so `assert_node_state` (and any `type:"assert"` step inside `run_test_scenario`) returned `Unknown command: assert_node_state` on every call from v1.7.0 through v1.14.0. Restored the handler with all 8 operators (`eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `contains`, `type_is`) and sub-property access via `get_indexed()` (e.g. `position:y`). Reported by **Z_runner [CRWN]** on Discord.
+
+---
+
+## v1.14.0 — 2026-05-18
+
+**Feature / Safety** — File-conflict safety overhaul (community contribution)
+
+This release is a coordinated overhaul of how the addon interacts with editor-owned resources. It prevents the "external change" dialog and silent in-memory/disk divergence that could occur when MCP commands wrote scenes, scripts, shaders, or resources while Godot still had them open. Contributed by **[@aallnneess](https://github.com/aallnneess)** (PR #31), with the design and patch reviewed and tested locally with GitHub Copilot using GPT-5.5 xhigh. Reported and validated against the previous v1.13.x behavior.
+
+### Added — safety primitives in `base_command.gd`
+- `guard_offline_scene_save(path)`: blocks `ResourceSaver.save(...)` to a `.tscn`/`.scn` path when that scene is currently open in the editor. Returns a structured conflict error (JSON-RPC code `-32009`) including the path, open-scenes list, and a recovery suggestion.
+- `guard_text_resource_write(path, force)`: blocks writes to a script/shader file that is currently open in Godot's script editor (or, for shaders, currently loaded/cached in `ResourceLoader`). Override with `force=true`.
+- `add_child_with_undo(...)` / `set_property_with_undo(...)`: register live scene mutations through `EditorUndoRedoManager` with correct `add_do_reference` / `add_undo_reference` retention for `Resource` values so they survive GC across the undo history.
+- `get_open_scene_paths()` / `is_scene_path_open()` / `is_active_scene_path()` / `is_text_resource_open_in_script_editor()`: shared checks so per-command code never re-implements the same logic.
+- `normalize_project_path()`: consistent comparison key for `res://`, project-relative, and absolute paths.
+
+### Changed — scene saves go through `EditorInterface`
+- `save_scene`: when the target path matches the active edited scene, calls `EditorInterface.save_scene()`; when the target differs or the active scene has no path yet, calls `EditorInterface.save_scene_as(path)`. Refuses to save an inactive open scene tab. No more silent `ResourceSaver.save` to an open path.
+- `create_scene` / `create_theme` / `edit_resource`: all guarded against accidentally targeting an open scene path.
+
+### Changed — broad cross-scene edits are opt-in
+- **`cross_scene_set_property` defaults to `dry_run=true`** (breaking change). Real writes now require `dry_run=false` **and** `force=true`. The response includes a per-scene `mode` field (`dry_run` / `offline_saved` / `live_open_scene`) and a `skipped_open_scenes` list so callers can see exactly what happened.
+- The active open scene is live-edited via `EditorUndoRedoManager` instead of being offline-overwritten, so changes are visible in the editor and undoable.
+- Inactive open scenes are skipped and reported rather than silently overwritten.
+
+### Changed — live scene mutations participate in UndoRedo
+- `batch_add_nodes`, `batch_set_property`: routed through the shared UndoRedo helpers.
+- `node_commands`: node creation, `set_anchor_preset` (computed on a duplicate Control before applying), signal connect/disconnect, group add/remove — all undoable.
+- `animation_commands`: animation create/remove, track add, and keyframe edits. `_upsert_animation_key` / `_restore_animation_key` give round-trip undo for keyframe edits (including the previously-present-key replacement case) using `is_equal_approx` time matching.
+- `animation_tree_commands`: AnimationTree create, state machine state/transition edits, blend tree node changes, tree parameter edits.
+- `tilemap_commands`: single-cell set, rect fill, and clear capture the affected cells' old state and apply via UndoRedo. Round-trip undoable.
+- `theme_commands`: color, constant, font-size, and stylebox theme overrides; `setup_control` computes target state on a duplicate Control before applying.
+- `audio_commands`, `navigation_commands`, `particle_commands`: node creation and resource assignment go through UndoRedo. Navigation bake also marks the active scene unsaved.
+- `shader_commands`: shader material assignment via `set_property_with_undo`.
+
+### Fixed — open script/shader writes
+- `create_script` / `edit_script`: refuse to write when the target is open in the script editor, unless `force=true` is explicitly passed. Also restricted to `.gd` / `.cs` extensions — scene and shader paths are rejected with a clear suggestion (added in `6d8d650`).
+- `edit_script` now actually implements the 1-based inclusive `start_line` / `end_line` range replacement that the CLI had been advertising. The TypeScript `edit_script` schema and CLI `script edit` both expose the new parameters.
+- `create_shader` / `edit_shader`: same open-file guard, with `force=true` to override.
+- Shader cache refresh fixed: `_refresh_loaded_shader` uses `take_over_path()` + `emit_changed()` to update any cached/live `Shader` resource, replacing the unreliable `Shader.reload_from_file()` call. Live materials referencing the shader now pick up edits immediately.
+
+### Fixed — `execute_editor_script` escape hatch
+- Submitted code is scanned for direct file/resource write APIs (`ResourceSaver.save`, `FileAccess WRITE`, `ProjectSettings.save`, `ConfigFile.save`, `DirAccess` filesystem mutations). If present, the call is refused with a structured conflict error unless `allow_unsafe_editor_io=true` is explicitly passed. Closes the obvious workaround where an AI client could route around the per-command guards by submitting raw script.
+
+### Changed — server schemas
+- `create_script` / `edit_script` / `create_shader` / `edit_shader`: added optional `force` parameter and updated tool descriptions.
+- `cross_scene_set_property`: added optional `dry_run` / `force` parameters and a description that reflects the new dry-run-by-default semantics.
+- `execute_editor_script`: added optional `allow_unsafe_editor_io` parameter.
+- `cli.ts`: `script create` and `script edit` accept `--force` flag.
+
+### Migration notes
+- **Breaking**: scripts/agents that previously relied on `cross_scene_set_property` writing on first call now need to add `dry_run=false force=true` to perform writes. Without those, the call returns a dry-run preview. This is intentional — silent project-wide writes were a footgun.
+- **Soft-breaking**: scripts/agents that previously overwrote open files (scenes, scripts, shaders) without checking now hit a `-32009` conflict error. The fix is to either close the file in the editor first, save through the editor (for scenes), or pass `force=true` (for scripts/shaders, when you've verified no buffer holds unsaved changes).
+- Existing wire-compatible calls that did *not* target open resources continue to work unchanged.
+
+---
+
+## v1.13.2 — 2026-05-13
+
+**Bug Fix** — Port allocation race when multiple Claude Code sessions start at the same time
+
+### Fixed
+- **Parallel-session port collision** (Discord report by CrusherEAGLE): Two Claude Code sessions starting nearly simultaneously could both pre-check port 6505 as free, both attempt to bind, the loser would get `EADDRINUSE` and give up without retrying the next port. The session that lost the race had a server that never started, so every tool call failed for the remainder of that session with no way to recover short of restart. The fallback path in `index.ts` claimed it would "retry on first command" but no such retry existed.
+- The fix replaces the racy pre-check + single bind with a proper bind-retry loop: each port in `6505–6509` is tried in turn, and `EADDRINUSE` triggers a fall-through to the next port. Only when the entire range is exhausted does `connect()` reject, with a clear error message and remediation hint.
+- Cleaned up the misleading "will retry on first command" log line in `index.ts`.
+
+### Tests
+- New `tests/godot-connection.test.ts` covers: first-port allocation, sequential fall-through, **simultaneous parallel connects** (the exact regression scenario), range exhaustion, and `fixedPort=true` fail-fast behavior. 5 new tests, 62 total.
+
+---
+
+## v1.13.1 — 2026-05-12
+
+**Bug Fix** — Silent disconnect / dead-connection recovery
+
+### Fixed
+- **Heartbeat now actually detects dead connections** (Discord report by CrusherEAGLE): The `ping`/`pong` heartbeat was being sent every 10s but neither side tracked whether responses were arriving, so a half-open TCP connection (common on Windows after sleep/wake, VPN toggle, or a brief editor hang) left both sides holding a dead socket. `isConnected()` continued to return `true`, every command timed out at 30s, and the only way back was to restart Claude Code **and** the Godot editor. Fixed on both sides:
+  - **Server**: tracks the last `pong` timestamp; if 30s passes with no pong, forcibly destroys the socket (`terminate()`, vs `close()` which waits for a FIN ack that never comes on a dead link). Pending requests are rejected immediately rather than hanging for 30s.
+  - **Editor**: sends its own `ping` every 5s, tracks per-port inactivity, and after 30s of inbound silence force-closes the peer so the existing 3s reconnect cycle takes over.
+  - **OS-level TCP keepalive** enabled on the server socket (5s initial delay), surfacing half-open links faster than Windows' ~2-hour default.
+- **Status panel surfaces stale state**: New yellow ⚠ indicator when a port is reconnecting from a stale state, plus per-port idle time (seconds since last received message) in the Clients tab. No more "looks fine while everything is broken" UI.
+
+### Notes
+- Recovery is automatic within ~30s after the connection dies. Watch the Output panel for `[MCP] Port NNNN silent for X.Xs — forcing reconnect` if you want to see it happen.
+- No API or tool changes — same 172 tools, same behavior in the healthy path.
+
+---
+
 ## v1.13.0 — 2026-05-05
 
 **Bug Fixes & Polish** — Mouse motion dispatch, setup config, site pricing
