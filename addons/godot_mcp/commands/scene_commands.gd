@@ -26,7 +26,7 @@ func _get_scene_tree(params: Dictionary) -> Dictionary:
 		return error_no_scene()
 
 	var max_depth: int = optional_int(params, "max_depth", -1)
-	var tree := NodeUtils.get_node_tree(root, max_depth)
+	var tree := NodeUtils.get_node_tree(root, root, max_depth)
 	return success({"scene_path": root.scene_file_path, "tree": tree})
 
 

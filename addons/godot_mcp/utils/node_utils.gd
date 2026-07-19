@@ -8,12 +8,16 @@ static func set_owner_recursive(node: Node, owner: Node) -> void:
 		set_owner_recursive(child, owner)
 
 
-## Get a simplified tree structure from a node
-static func get_node_tree(node: Node, max_depth: int = -1, current_depth: int = 0) -> Dictionary:
+## Get a simplified tree structure from a node.
+## Paths are scene-relative (usable as node_path input for other tools) —
+## node.get_path() would leak the editor's internal dock hierarchy.
+static func get_node_tree(node: Node, root: Node = null, max_depth: int = -1, current_depth: int = 0) -> Dictionary:
+	if root == null:
+		root = node
 	var result := {
 		"name": node.name,
 		"type": node.get_class(),
-		"path": str(node.get_path()),
+		"path": "." if node == root else str(root.get_path_to(node)),
 	}
 
 	# Add script info
@@ -25,7 +29,7 @@ static func get_node_tree(node: Node, max_depth: int = -1, current_depth: int = 
 	if max_depth == -1 or current_depth < max_depth:
 		var children: Array = []
 		for child in node.get_children():
-			children.append(get_node_tree(child, max_depth, current_depth + 1))
+			children.append(get_node_tree(child, root, max_depth, current_depth + 1))
 		if not children.is_empty():
 			result["children"] = children
 

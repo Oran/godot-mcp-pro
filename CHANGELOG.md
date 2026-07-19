@@ -4,30 +4,32 @@ All notable changes to Godot MCP Pro will be documented in this file.
 
 ---
 
-## v1.15.0 — 2026-06-25
+## v1.15.1 — 2026-07-19
 
-**Feature** — Editor selection tools + legacy TileMap support (community contributions)
+**Patch** — 15 fixes from an external user's full-toolset audit (all 174 tools tested against a live editor). Huge thanks to the reporter.
 
-Two community contributions from **[@aallnneess](https://github.com/aallnneess)** (PRs #33 and #32), reviewed and verified locally against the live editor command router in Godot 4.6.1.
+### Fixed — Critical
+- **`set_particle_color_gradient` infinite loop / editor hang**: clearing a fresh `Gradient` point-by-point never terminates because `Gradient.remove_point` refuses to drop below 2 points. Gradients are now built by assigning `offsets` / `colors` wholesale. The same root cause also produced a spurious opaque-black stop at offset 0 in every `apply_particle_preset` color ramp — both fixed via the same change.
+- **`connect_signal` connections were never saved to the `.tscn`**: `Object.connect()` was called without `CONNECT_PERSIST`, so `PackedScene.pack()` dropped the connection on save. Connections are now persistent; new optional `deferred` / `one_shot` parameters, and the response echoes `flags` / `persistent`.
+- **`update_property` destroyed Resource-typed properties**: assigning e.g. `texture` by `"res://..."` path passed the raw String through, which the engine coerced to `null` — silently wiping the existing value. `PropertyParser` now loads `res://` / `uid://` paths into Resources (also fixes `batch_add_nodes` properties), and `update_property` fails loudly when a string cannot be resolved instead of committing a `null`.
 
-### Added — editor selection tools (`node_commands.gd`)
-- **`get_editor_selection`**: reads the current Scene-dock selection. `top_only` returns only the topmost selected nodes (excludes a child when its parent is already selected). Each node is reported with `name`, scene-relative `path`, and `type`.
-- **`select_nodes`**: sets the editor selection for one (`node_path`) or many (`node_paths`) nodes, with `mode` = `replace` / `add` / `remove`. Optionally focuses the node (`edit_node`) and the Inspector (`inspect_object`, with `for_property` / `inspector_only`).
-- **`clear_editor_selection`**: clears the current selection and reports how many nodes were deselected.
-- Built on Godot's public `EditorSelection` / `EditorInterface` API (no Scene-dock internals).
-- Node tool count 14 → 17; total tool count 172 → 175.
+### Fixed — High
+- **`create_theme` returned `{}` and never wrote the file**: a `!= null` check on a `Dictionary` guard made the guard branch unconditional. Now uses `is_empty()` like every other call site. Also creates parent directories.
+- **`get_performance_monitors` reported the editor process's metrics as the game's**: `Performance` is per-process. The tool now routes through the game IPC channel (requires a playing scene) and returns `"process": "game"`; use `get_editor_performance` for editor metrics.
+- **`get_test_report` counted passing assertions as failures**: non-assertion steps (input/wait/screenshot) were scored as failed, and game replies were stored still double-wrapped so their `passed` key was never found. Only assertion results are stored now, and the envelope is unwrapped defensively. Empty reports return `no_results: true` instead of a misleading `all_passed: false`.
+- **`run_test_scenario` reported `all_passed: false` on green runs**: same double-wrapped envelope, unwrapped one level too few in `_execute_assert_step`. Assertion results now surface `passed` at the top level with a consistent shape.
 
-### Added — legacy `TileMap` support (`tilemap_commands.gd`)
-- All `tilemap_*` commands now accept deprecated multi-layer `TileMap` nodes in addition to the current `TileMapLayer`, so MCP clients can inspect and edit older scenes (useful for migration workflows). `TileMapLayer` remains the primary, documented path.
-- Optional `layer` parameter for legacy `TileMap` on `tilemap_set_cell` / `tilemap_fill_rect` / `tilemap_get_cell` / `tilemap_get_used_cells` / `tilemap_clear` (defaults to `0`). `TileMapLayer` only accepts `layer = 0` (one implicit layer).
-- Out-of-range layers return a clear parameter error (e.g. `layer 9 is out of range for TileMap with 2 layers`).
-- Layer-aware UndoRedo; `tilemap_clear` can clear a single legacy layer or all of them. Responses now include `node_class` and `layer`; `tilemap_get_info` adds `layer_count` and a per-layer `layers` array.
+### Fixed — Medium
+- **`get_scene_tree` returned editor-internal absolute paths** (`/root/@EditorNode@.../...`): paths are now scene-relative (root = `"."`), directly usable as `node_path` input for other tools, and ~10× smaller.
+- **`analyze_signal_flow` dumped editor-internal connections** (~8k tokens of dock bookkeeping): now filters to persistent connections targeting nodes inside the edited scene.
+- **`find_unused_resources` ignored `uid://` references**: `preload("uid://…")` and `uid=` references are now resolved back to their `res://` paths (self-referencing file-header uids excluded). References held via `ProjectSettings` defaults (main scene, audio bus layout, icon, autoloads) are also seeded, so `default_bus_layout.tres` and friends are no longer reported deletable.
+- **`get_input_actions(include_builtin: false)` leaked 16 editor actions** (`spatial_editor/*`): actions not declared in the project's `ProjectSettings` are now excluded.
+- **`create_resource` failed on missing parent directories**: directories are created recursively; the error message now includes the path.
+- **`run_test_scenario` `keycode` input steps never released the key**, corrupting later assertions: keycode steps now auto-release like `action` steps (disable with `auto_release: false`).
 
-### Fixed
-- **`select_nodes` multi-node selection collapse**: under default parameters (`inspect`/`focus` = true), the trailing `edit_node()` / `inspect_object()` calls reset `EditorSelection` to a single node, collapsing a multi-node selection down to the last node. Focus/inspect is now applied only when exactly one node is selected, so multi-node selections persist as requested. Caught during local verification in Godot 4.6.1.
-
-### Note
-This release also folds in the previously-tagged-but-unreleased **v1.14.1** patch (`assert_node_state` regression fix), shipped together here.
+### Fixed — Minor
+- **`set_particle_material`**: emission sub-parameters (`emission_sphere_radius`, box extents, ring radii/height) are now listed in `changes[]`.
+- `run_test_scenario` screen-text assertions no longer lose their result type to a key collision (`assert_type` field).
 
 ---
 

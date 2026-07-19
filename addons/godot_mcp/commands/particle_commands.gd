@@ -198,24 +198,30 @@ func _set_particle_material(params: Dictionary) -> Dictionary:
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 				if params.has("emission_sphere_radius"):
 					mat.emission_sphere_radius = float(params["emission_sphere_radius"])
+					changes.append("emission_sphere_radius")
 			"sphere_surface":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE_SURFACE
 				if params.has("emission_sphere_radius"):
 					mat.emission_sphere_radius = float(params["emission_sphere_radius"])
+					changes.append("emission_sphere_radius")
 			"box":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
 				if params.has("emission_box_extents"):
 					var ext = params["emission_box_extents"]
 					if ext is Dictionary:
 						mat.emission_box_extents = Vector3(float(ext.get("x", 1)), float(ext.get("y", 1)), float(ext.get("z", 1)))
+						changes.append("emission_box_extents")
 			"ring":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
 				if params.has("emission_ring_radius"):
 					mat.emission_ring_radius = float(params["emission_ring_radius"])
+					changes.append("emission_ring_radius")
 				if params.has("emission_ring_inner_radius"):
 					mat.emission_ring_inner_radius = float(params["emission_ring_inner_radius"])
+					changes.append("emission_ring_inner_radius")
 				if params.has("emission_ring_height"):
 					mat.emission_ring_height = float(params["emission_ring_height"])
+					changes.append("emission_ring_height")
 		changes.append("emission_shape")
 
 	# Angular velocity
@@ -276,16 +282,20 @@ func _set_particle_color_gradient(params: Dictionary) -> Dictionary:
 	if stops.is_empty():
 		return error_invalid_params("stops array must not be empty")
 
-	var gradient := Gradient.new()
-	# Remove default points
-	while gradient.get_point_count() > 0:
-		gradient.remove_point(0)
-
+	# Gradient.remove_point refuses to drop below 2 points, so a fresh Gradient
+	# cannot be cleared point by point — assign offsets/colors wholesale instead.
+	var offsets := PackedFloat32Array()
+	var colors := PackedColorArray()
 	for stop in stops:
 		if stop is Dictionary:
-			var offset: float = float(stop.get("offset", 0.0))
-			var color: Color = _parse_color(str(stop.get("color", "#ffffff")))
-			gradient.add_point(offset, color)
+			offsets.append(float(stop.get("offset", 0.0)))
+			colors.append(_parse_color(str(stop.get("color", "#ffffff"))))
+	if offsets.is_empty():
+		return error_invalid_params("stops array must contain {offset, color} dictionaries")
+
+	var gradient := Gradient.new()
+	gradient.offsets = offsets
+	gradient.colors = colors
 
 	var grad_tex := GradientTexture1D.new()
 	grad_tex.gradient = gradient
@@ -516,12 +526,16 @@ func _register_particle_state_undo(node: Node, old_state: Dictionary, new_state:
 
 
 func _apply_gradient(mat: ParticleProcessMaterial, stops: Array) -> void:
-	var gradient := Gradient.new()
-	# Remove default points before adding custom stops
-	for i in range(gradient.get_point_count() - 1, -1, -1):
-		gradient.remove_point(i)
+	# Assign offsets/colors wholesale: Gradient.remove_point cannot drop below
+	# 2 points, so clearing the default points one by one leaves a stray stop.
+	var offsets := PackedFloat32Array()
+	var colors := PackedColorArray()
 	for stop in stops:
-		gradient.add_point(stop["offset"], stop["color"])
+		offsets.append(stop["offset"])
+		colors.append(stop["color"])
+	var gradient := Gradient.new()
+	gradient.offsets = offsets
+	gradient.colors = colors
 	var grad_tex := GradientTexture1D.new()
 	grad_tex.width = 64  # Smaller texture to avoid GPU issues in compatibility mode
 	grad_tex.gradient = gradient

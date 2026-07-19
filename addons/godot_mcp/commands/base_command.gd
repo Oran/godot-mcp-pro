@@ -175,6 +175,94 @@ func guard_offline_scene_save(path: String) -> Dictionary:
 	return {}
 
 
+## Helper: create the parent directory of a res:// path if missing.
+## Returns {} on success, an error dictionary on failure.
+func ensure_parent_dir(path: String) -> Dictionary:
+	var dir := path.get_base_dir()
+	if dir.is_empty() or DirAccess.dir_exists_absolute(dir):
+		return {}
+	var derr := DirAccess.make_dir_recursive_absolute(dir)
+	if derr != OK:
+		return error_internal("Cannot create directory '%s': %s" % [dir, error_string(derr)])
+	return {}
+
+
+## Helper: unwrap the (possibly multi-)wrapped {"result": ...} envelope returned
+## by the game IPC channel. The game writes its own {"result": ...} envelope and
+## the transport wraps it again, so consumers must unwrap defensively.
+func unwrap_game_result(result: Dictionary) -> Dictionary:
+	var payload: Variant = result
+	while payload is Dictionary and payload.has("result") and payload["result"] is Dictionary:
+		payload = payload["result"]
+	return payload if payload is Dictionary else {}
+
+
+## Shared IPC helper: send a command to the running game and await its response.
+func send_game_command(command: String, params: Dictionary = {}, timeout_sec: float = 5.0) -> Dictionary:
+	var ei := get_editor()
+	if not ei.is_playing_scene():
+		return error(-32000, "No scene is currently playing", {"suggestion": "Use play_scene first"})
+
+	var user_dir := get_game_user_dir()
+	var request_path := user_dir + "/mcp_game_request"
+	var response_path := user_dir + "/mcp_game_response"
+
+	# Clean stale response
+	if FileAccess.file_exists(response_path):
+		DirAccess.remove_absolute(response_path)
+
+	# Write request
+	var request_data := JSON.stringify({"command": command, "params": params})
+	var req := FileAccess.open(request_path, FileAccess.WRITE)
+	if req == null:
+		return error_internal("Could not create game request file")
+	req.store_string(request_data)
+	req.close()
+
+	# Poll for response
+	var attempts := int(timeout_sec / 0.1)
+	while attempts > 0:
+		await get_tree().create_timer(0.1).timeout
+		if FileAccess.file_exists(response_path):
+			break
+		if not ei.is_playing_scene():
+			if FileAccess.file_exists(request_path):
+				DirAccess.remove_absolute(request_path)
+			return error(-32000, "Game stopped during command execution")
+		attempts -= 1
+
+	if not FileAccess.file_exists(response_path):
+		# Try to auto-resume the debugger (runtime error may have paused the game)
+		if ei.is_playing_scene():
+			try_debugger_continue()
+			for _retry in 20:
+				await get_tree().create_timer(0.1).timeout
+				if FileAccess.file_exists(response_path):
+					break
+
+	if not FileAccess.file_exists(response_path):
+		if FileAccess.file_exists(request_path):
+			DirAccess.remove_absolute(request_path)
+		return build_timeout_error(timeout_sec)
+
+	# Read response
+	var file := FileAccess.open(response_path, FileAccess.READ)
+	if file == null:
+		return error_internal("Could not read game response file")
+	var text := file.get_as_text()
+	file.close()
+	DirAccess.remove_absolute(response_path)
+
+	var parsed = JSON.parse_string(text)
+	if parsed == null or not parsed is Dictionary:
+		return error_internal("Invalid response JSON from game")
+
+	if parsed.has("error"):
+		return error(-32000, str(parsed["error"]))
+
+	return success(parsed)
+
+
 func is_shader_resource_path(path: String) -> bool:
 	var ext := path.get_extension().to_lower()
 	return ext == "gdshader" or ext == "gdshaderinc" or ext == "shader"

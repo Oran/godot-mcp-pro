@@ -28,8 +28,12 @@ func _create_theme(params: Dictionary) -> Dictionary:
 		theme.default_font_size = font_size
 
 	var scene_guard := guard_offline_scene_save(path)
-	if scene_guard != null:
+	if not scene_guard.is_empty():
 		return scene_guard
+
+	var dir_guard := ensure_parent_dir(path)
+	if not dir_guard.is_empty():
+		return dir_guard
 
 	var err := ResourceSaver.save(theme, path)
 	if err != OK:

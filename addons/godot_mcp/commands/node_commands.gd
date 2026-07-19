@@ -274,6 +274,16 @@ func _update_property(params: Dictionary) -> Dictionary:
 				parsed_value = target_node
 				break
 
+	# Fail loudly instead of committing a String into an Object-typed property —
+	# the engine would coerce it to null and silently destroy the existing value.
+	if value is String and typeof(old_value) == TYPE_OBJECT and parsed_value == null:
+		return error_invalid_params(
+			"Could not resolve '%s' to a Resource for property '%s'" % [str(value), property])
+	if value is String and parsed_value is String and typeof(old_value) in [TYPE_NIL, TYPE_OBJECT] \
+			and (str(value).begins_with("res://") or str(value).begins_with("uid://")):
+		return error_not_found("Resource '%s'" % str(value),
+			"The path could not be loaded for property '%s'" % property)
+
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Set %s.%s" % [node.name, property])
 	undo_redo.add_do_property(node, property, parsed_value)
@@ -642,10 +652,18 @@ func _connect_signal(params: Dictionary) -> Dictionary:
 	if source.is_connected(signal_name, Callable(target, method_name)):
 		return success({"already_connected": true, "signal": signal_name})
 
+	# CONNECT_PERSIST is required for PackedScene.pack() to serialize the
+	# connection into the .tscn — without it the connection is editor-memory only.
+	var flags: int = Object.CONNECT_PERSIST
+	if optional_bool(params, "deferred", false):
+		flags |= Object.CONNECT_DEFERRED
+	if optional_bool(params, "one_shot", false):
+		flags |= Object.CONNECT_ONE_SHOT
+
 	var callable := Callable(target, method_name)
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Connect signal")
-	undo_redo.add_do_method(source, "connect", signal_name, callable)
+	undo_redo.add_do_method(source, "connect", signal_name, callable, flags)
 	undo_redo.add_undo_method(source, "disconnect", signal_name, callable)
 	undo_redo.commit_action()
 
@@ -655,6 +673,8 @@ func _connect_signal(params: Dictionary) -> Dictionary:
 		"target": str(root.get_path_to(target)),
 		"method": method_name,
 		"connected": true,
+		"flags": flags,
+		"persistent": true,
 	})
 
 

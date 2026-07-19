@@ -131,9 +131,13 @@ func _create_resource(params: Dictionary) -> Dictionary:
 			var current: Variant = resource.get(prop_name)
 			resource.set(prop_name, PropertyParser.parse_value(properties[prop_name], typeof(current)))
 
+	var dir_guard := ensure_parent_dir(path)
+	if not dir_guard.is_empty():
+		return dir_guard
+
 	var err := ResourceSaver.save(resource, path)
 	if err != OK:
-		return error_internal("Failed to save resource: %s" % error_string(err))
+		return error_internal("Failed to save resource '%s': %s" % [path, error_string(err)])
 
 	# Rescan filesystem
 	EditorInterface.get_resource_filesystem().scan()

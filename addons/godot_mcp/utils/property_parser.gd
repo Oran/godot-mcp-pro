@@ -41,6 +41,17 @@ static func parse_value(value: Variant, target_type: int = TYPE_NIL) -> Variant:
 		TYPE_DICTIONARY:
 			if value is Dictionary: return value
 			return {}
+		TYPE_OBJECT:
+			if value is Object:
+				return value
+			if value is String:
+				var s: String = value
+				if (s.begins_with("res://") or s.begins_with("uid://")) and ResourceLoader.exists(s):
+					return ResourceLoader.load(s)
+				# Unresolvable string for an Object-typed property: return null so
+				# callers can detect the failure instead of coercing to null silently.
+				return null
+			return value
 		_:
 			return value
 
@@ -76,6 +87,10 @@ static func _auto_parse(value: Variant) -> Variant:
 	# Rect2
 	if s.begins_with("Rect2("):
 		return _parse_rect2(s)
+
+	# Resource path (covers unset Object properties, where typeof(null) is TYPE_NIL)
+	if (s.begins_with("res://") or s.begins_with("uid://")) and ResourceLoader.exists(s):
+		return ResourceLoader.load(s)
 
 	return s
 
