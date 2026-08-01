@@ -9,6 +9,7 @@ enum State { IDLE, CAPTURING_FRAMES, MONITORING, RECORDING, MOVING_TO, WATCHING_
 
 var _state := State.IDLE
 var _pending_command: bool = false  # Crash recovery flag
+var _request_id: String = ""  # Echoed back so the editor can correlate replies
 
 # Frame capture state
 var _capture_frames_remaining: int = 0
@@ -53,6 +54,12 @@ var _moveto_keys_held: Array = []  # Track injected keys for guaranteed release
 
 
 func _ready() -> void:
+	# Editor-driven service only — disable it in exported builds rather than
+	# stat'ing user:// every frame in players' games.
+	if not OS.has_feature("editor") or OS.has_environment("GODOT_MCP_HEADLESS_CHILD"):
+		process_mode = Node.PROCESS_MODE_DISABLED
+		set_process(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
@@ -105,8 +112,13 @@ func _handle_request() -> void:
 	_state = State.IDLE
 	_pending_command = true
 
+	# Echoed back with the response so the editor can tell its own reply from
+	# a late one belonging to a command that already timed out.
+	_request_id = str(parsed.get("request_id", ""))
+
 	var command: String = parsed.get("command", "")
-	var params: Dictionary = parsed.get("params", {})
+	var raw_params: Variant = parsed.get("params", {})
+	var params: Dictionary = raw_params if raw_params is Dictionary else {}
 
 	match command:
 		"get_scene_tree":
@@ -1611,6 +1623,9 @@ func _reconstruct_event(data: Dictionary) -> InputEvent:
 
 func _write_response(data: Dictionary) -> void:
 	_pending_command = false
+	if not _request_id.is_empty():
+		data = data.duplicate()
+		data["request_id"] = _request_id
 	var json := JSON.stringify(data)
 	var file := FileAccess.open(RESPONSE_PATH, FileAccess.WRITE)
 	if file:

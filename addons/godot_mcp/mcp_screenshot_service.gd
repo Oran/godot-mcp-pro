@@ -7,6 +7,13 @@ const SCREENSHOT_PATH := "user://mcp_screenshot.png"
 
 
 func _ready() -> void:
+	# This service only exists to serve the editor-driven MCP workflow. In an
+	# exported game it would poll user:// every frame for nothing, so shut it
+	# down entirely there.
+	if not OS.has_feature("editor") or OS.has_environment("GODOT_MCP_HEADLESS_CHILD"):
+		process_mode = Node.PROCESS_MODE_DISABLED
+		set_process(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 

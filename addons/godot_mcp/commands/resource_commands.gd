@@ -26,6 +26,13 @@ func _read_resource(params: Dictionary) -> Dictionary:
 	if not guard.is_empty():
 		return guard
 
+	# A script or shader also loads as a Resource, so without this the resource
+	# tool could rewrite a file the user has open in the script editor —
+	# the exact case guard_text_resource_write exists to prevent.
+	var text_guard := guard_text_resource_write(path, optional_bool(params, "force", false))
+	if not text_guard.is_empty():
+		return text_guard
+
 	var resource: Resource = ResourceLoader.load(path)
 	if resource == null:
 		return error_internal("Failed to load resource: %s" % path)
@@ -115,6 +122,10 @@ func _create_resource(params: Dictionary) -> Dictionary:
 	var overwrite: bool = optional_bool(params, "overwrite", false)
 	if FileAccess.file_exists(path) and not overwrite:
 		return error(-32000, "Resource already exists: %s" % path, {"suggestion": "Set overwrite=true to replace"})
+
+	var ext_guard := guard_expected_extension(path, ["tres", "res"], "a resource file")
+	if not ext_guard.is_empty():
+		return ext_guard
 
 	var guard := guard_offline_scene_save(path)
 	if not guard.is_empty():

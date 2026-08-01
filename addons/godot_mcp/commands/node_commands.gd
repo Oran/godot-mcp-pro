@@ -60,6 +60,13 @@ func _add_node(params: Dictionary) -> Dictionary:
 	var custom_script: Script = null
 
 	if ClassDB.class_exists(type):
+		# class_exists() is also true for Resources and abstract classes.
+		# Assigning either into the typed `node` local raises, which aborts the
+		# handler so the caller gets no response at all.
+		if not ClassDB.is_parent_class(type, "Node"):
+			return error_invalid_params("'%s' is not a Node type" % type)
+		if not ClassDB.can_instantiate(type):
+			return error_invalid_params("'%s' is abstract and cannot be instantiated" % type)
 		node = ClassDB.instantiate(type)
 	else:
 		# Try to find a script with matching class_name
@@ -67,10 +74,14 @@ func _add_node(params: Dictionary) -> Dictionary:
 		if custom_script == null:
 			return error_invalid_params("Unknown node type: '%s'. Not found in ClassDB or as a script class_name. Use list_scripts to see available script classes." % type)
 		var base_type: String = custom_script.get_instance_base_type()
-		if not ClassDB.class_exists(base_type):
+		if not ClassDB.class_exists(base_type) or not ClassDB.is_parent_class(base_type, "Node"):
 			return error_invalid_params("Script '%s' extends '%s' which is not a valid node type" % [type, base_type])
+		if not ClassDB.can_instantiate(base_type):
+			return error_invalid_params("Script '%s' extends abstract class '%s'" % [type, base_type])
 		node = ClassDB.instantiate(base_type)
 		node.set_script(custom_script)
+	if node == null:
+		return error_internal("Could not instantiate '%s'" % type)
 	if not node_name.is_empty():
 		node.name = node_name
 
@@ -151,9 +162,22 @@ func _duplicate_node(params: Dictionary) -> Dictionary:
 	if new_name.is_empty():
 		new_name = str(node.name) + "_copy"
 
+	# The edited scene root does have a parent — an editor-internal node — so a
+	# copy attached there lands OUTSIDE the scene and is silently discarded on
+	# save. Verified: duplicating "." produced "../Main_copy", absent from
+	# get_scene_tree. Refuse instead of producing an orphan.
+	if node == root:
+		return error_invalid_params(
+			"Cannot duplicate the scene root '%s'. A copy would be attached outside the scene and lost on save; duplicate a child instead." % node.name
+		)
+	var parent := node.get_parent()
+	if parent == null:
+		return error_invalid_params(
+			"Node '%s' has no parent to attach the copy to." % node.name
+		)
+
 	var dup := node.duplicate()
 	dup.name = new_name
-	var parent := node.get_parent()
 
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Duplicate %s" % node.name)

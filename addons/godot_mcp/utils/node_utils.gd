@@ -61,10 +61,15 @@ static func get_node_properties_dict(node: Node) -> Dictionary:
 
 
 ## Duplicate a node and all its children, properly setting owners
+## Returns null when `node` has no parent — the scene root cannot be duplicated
+## in place, and dereferencing the null parent would raise.
 static func duplicate_node_in_scene(node: Node, new_name: String, root: Node) -> Node:
+	var parent := node.get_parent()
+	if parent == null:
+		return null
 	var dup := node.duplicate()
 	dup.name = new_name
-	node.get_parent().add_child(dup)
+	parent.add_child(dup)
 	dup.owner = root
 	set_owner_recursive(dup, root)
 	return dup

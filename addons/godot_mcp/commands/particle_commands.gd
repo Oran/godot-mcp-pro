@@ -70,10 +70,10 @@ func _create_particles(params: Dictionary) -> Dictionary:
 	var node_name: String = optional_string(params, "name", "Particles")
 	var is_3d: bool = optional_bool(params, "is_3d", false)
 	var amount: int = optional_int(params, "amount", 16)
-	var lifetime: float = float(params.get("lifetime", 1.0))
+	var lifetime: float = optional_float(params, "lifetime", 1.0)
 	var one_shot: bool = optional_bool(params, "one_shot", false)
-	var explosiveness: float = float(params.get("explosiveness", 0.0))
-	var randomness: float = float(params.get("randomness", 0.0))
+	var explosiveness: float = optional_float(params, "explosiveness", 0.0)
+	var randomness: float = optional_float(params, "randomness", 0.0)
 	var emitting: bool = optional_bool(params, "emitting", true)
 
 	var particles_node: Node
@@ -150,15 +150,15 @@ func _set_particle_material(params: Dictionary) -> Dictionary:
 
 	# Spread
 	if params.has("spread"):
-		mat.spread = float(params["spread"])
+		mat.spread = optional_float(params, "spread")
 		changes.append("spread")
 
 	# Initial velocity
 	if params.has("initial_velocity_min"):
-		mat.initial_velocity_min = float(params["initial_velocity_min"])
+		mat.initial_velocity_min = optional_float(params, "initial_velocity_min")
 		changes.append("initial_velocity_min")
 	if params.has("initial_velocity_max"):
-		mat.initial_velocity_max = float(params["initial_velocity_max"])
+		mat.initial_velocity_max = optional_float(params, "initial_velocity_max")
 		changes.append("initial_velocity_max")
 
 	# Gravity
@@ -177,10 +177,10 @@ func _set_particle_material(params: Dictionary) -> Dictionary:
 
 	# Scale
 	if params.has("scale_min"):
-		mat.scale_min = float(params["scale_min"])
+		mat.scale_min = optional_float(params, "scale_min")
 		changes.append("scale_min")
 	if params.has("scale_max"):
-		mat.scale_max = float(params["scale_max"])
+		mat.scale_max = optional_float(params, "scale_max")
 		changes.append("scale_max")
 
 	# Color
@@ -197,12 +197,12 @@ func _set_particle_material(params: Dictionary) -> Dictionary:
 			"sphere":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 				if params.has("emission_sphere_radius"):
-					mat.emission_sphere_radius = float(params["emission_sphere_radius"])
+					mat.emission_sphere_radius = optional_float(params, "emission_sphere_radius")
 					changes.append("emission_sphere_radius")
 			"sphere_surface":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE_SURFACE
 				if params.has("emission_sphere_radius"):
-					mat.emission_sphere_radius = float(params["emission_sphere_radius"])
+					mat.emission_sphere_radius = optional_float(params, "emission_sphere_radius")
 					changes.append("emission_sphere_radius")
 			"box":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
@@ -214,43 +214,43 @@ func _set_particle_material(params: Dictionary) -> Dictionary:
 			"ring":
 				mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
 				if params.has("emission_ring_radius"):
-					mat.emission_ring_radius = float(params["emission_ring_radius"])
+					mat.emission_ring_radius = optional_float(params, "emission_ring_radius")
 					changes.append("emission_ring_radius")
 				if params.has("emission_ring_inner_radius"):
-					mat.emission_ring_inner_radius = float(params["emission_ring_inner_radius"])
+					mat.emission_ring_inner_radius = optional_float(params, "emission_ring_inner_radius")
 					changes.append("emission_ring_inner_radius")
 				if params.has("emission_ring_height"):
-					mat.emission_ring_height = float(params["emission_ring_height"])
+					mat.emission_ring_height = optional_float(params, "emission_ring_height")
 					changes.append("emission_ring_height")
 		changes.append("emission_shape")
 
 	# Angular velocity
 	if params.has("angular_velocity_min"):
-		mat.angular_velocity_min = float(params["angular_velocity_min"])
+		mat.angular_velocity_min = optional_float(params, "angular_velocity_min")
 		changes.append("angular_velocity_min")
 	if params.has("angular_velocity_max"):
-		mat.angular_velocity_max = float(params["angular_velocity_max"])
+		mat.angular_velocity_max = optional_float(params, "angular_velocity_max")
 		changes.append("angular_velocity_max")
 
 	# Orbit velocity
 	if params.has("orbit_velocity_min"):
-		mat.orbit_velocity_min = float(params["orbit_velocity_min"])
+		mat.orbit_velocity_min = optional_float(params, "orbit_velocity_min")
 		changes.append("orbit_velocity_min")
 	if params.has("orbit_velocity_max"):
-		mat.orbit_velocity_max = float(params["orbit_velocity_max"])
+		mat.orbit_velocity_max = optional_float(params, "orbit_velocity_max")
 		changes.append("orbit_velocity_max")
 
 	# Damping
 	if params.has("damping_min"):
-		mat.damping_min = float(params["damping_min"])
+		mat.damping_min = optional_float(params, "damping_min")
 		changes.append("damping_min")
 	if params.has("damping_max"):
-		mat.damping_max = float(params["damping_max"])
+		mat.damping_max = optional_float(params, "damping_max")
 		changes.append("damping_max")
 
 	# Attractor interaction
 	if params.has("attractor_interaction_enabled"):
-		mat.attractor_interaction_enabled = bool(params["attractor_interaction_enabled"])
+		mat.attractor_interaction_enabled = optional_bool(params, "attractor_interaction_enabled")
 		changes.append("attractor_interaction_enabled")
 
 	if not changes.is_empty():

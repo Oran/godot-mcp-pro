@@ -260,8 +260,8 @@ func _add_state_machine_state(params: Dictionary) -> Dictionary:
 		return error_invalid_params("State '%s' already exists" % state_name)
 
 	var state_type: String = optional_string(params, "state_type", "animation")
-	var position_x: float = float(params.get("position_x", 0.0))
-	var position_y: float = float(params.get("position_y", 0.0))
+	var position_x: float = optional_float(params, "position_x", 0.0)
+	var position_y: float = optional_float(params, "position_y", 0.0)
 	var position := Vector2(position_x, position_y)
 
 	var node: AnimationNode
@@ -387,7 +387,7 @@ func _add_state_machine_transition(params: Dictionary) -> Dictionary:
 
 	# xfade_time
 	if params.has("xfade_time"):
-		transition.xfade_time = float(params["xfade_time"])
+		transition.xfade_time = optional_float(params, "xfade_time")
 
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Add state machine transition")
@@ -489,8 +489,8 @@ func _set_blend_tree_node(params: Dictionary) -> Dictionary:
 		return bt_result[1]
 	var bt: AnimationNodeBlendTree = bt_result[0]
 
-	var position_x: float = float(params.get("position_x", 0.0))
-	var position_y: float = float(params.get("position_y", 0.0))
+	var position_x: float = optional_float(params, "position_x", 0.0)
+	var position_y: float = optional_float(params, "position_y", 0.0)
 	var position := Vector2(position_x, position_y)
 
 	var had_old_node := bt.has_node(StringName(bt_node_name))

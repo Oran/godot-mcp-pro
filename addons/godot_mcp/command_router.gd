@@ -41,6 +41,7 @@ func _register_commands() -> void:
 		preload("res://addons/godot_mcp/commands/particle_commands.gd"),
 		preload("res://addons/godot_mcp/commands/test_commands.gd"),
 		preload("res://addons/godot_mcp/commands/android_commands.gd"),
+		preload("res://addons/godot_mcp/commands/headless_commands.gd"),
 	]
 
 	for cmd_class in command_classes:
@@ -73,7 +74,20 @@ func execute(method: String, params: Dictionary) -> Dictionary:
 		}
 
 	var handler: Callable = _command_handlers[method]
-	var result: Dictionary = await handler.call(params)
+	# Not typed as Dictionary on assignment: a handler that returns something
+	# else would raise here, aborting the coroutine so no response is ever
+	# sent and the caller waits out its whole timeout instead of being told
+	# what went wrong.
+	var result: Variant = await handler.call(params)
+	if not result is Dictionary:
+		return {
+			"error": {
+				"code": -32603,
+				"message": "Handler for '%s' returned %s instead of a result dictionary" % [
+					method, type_string(typeof(result))
+				],
+			}
+		}
 	return result
 
 

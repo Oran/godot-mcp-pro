@@ -42,8 +42,8 @@ func _simulate_mouse_click(params: Dictionary) -> Dictionary:
 	var pressed: bool = optional_bool(params, "pressed", true)
 	var double_click: bool = optional_bool(params, "double_click", false)
 	var auto_release: bool = optional_bool(params, "auto_release", true)
-	var x: float = float(params.get("x", 0))
-	var y: float = float(params.get("y", 0))
+	var x: float = optional_float(params, "x", 0.0)
+	var y: float = optional_float(params, "y", 0.0)
 
 	var press_event := {
 		"type": "mouse_button",
@@ -74,10 +74,10 @@ func _simulate_mouse_click(params: Dictionary) -> Dictionary:
 
 
 func _simulate_mouse_move(params: Dictionary) -> Dictionary:
-	var x: float = float(params.get("x", 0))
-	var y: float = float(params.get("y", 0))
-	var rel_x: float = float(params.get("relative_x", 0))
-	var rel_y: float = float(params.get("relative_y", 0))
+	var x: float = optional_float(params, "x", 0.0)
+	var y: float = optional_float(params, "y", 0.0)
+	var rel_x: float = optional_float(params, "relative_x", 0.0)
+	var rel_y: float = optional_float(params, "relative_y", 0.0)
 	var button_mask: int = optional_int(params, "button_mask", 0)
 	var unhandled_explicit: bool = params.has("unhandled")
 	var unhandled: bool = optional_bool(params, "unhandled", false)
@@ -107,7 +107,7 @@ func _simulate_action(params: Dictionary) -> Dictionary:
 	var action_name: String = result[0]
 
 	var pressed: bool = optional_bool(params, "pressed", true)
-	var strength: float = float(params.get("strength", 1.0))
+	var strength: float = optional_float(params, "strength", 1.0)
 
 	var event := {
 		"type": "action",
@@ -129,8 +129,13 @@ func _simulate_sequence(params: Dictionary) -> Dictionary:
 
 	var frame_delay: int = optional_int(params, "frame_delay", 1)
 
-	for event_data: Dictionary in events:
-		if not event_data.has("type") or (event_data["type"] as String).is_empty():
+	for entry: Variant in events:
+		# Typed iteration would raise on a non-Dictionary entry, and `as String`
+		# raises on a non-String type — both abort before any response is sent.
+		if not entry is Dictionary:
+			return error_invalid_params("Each sequence event must be an object, got %s" % type_string(typeof(entry)))
+		var event_data: Dictionary = entry
+		if not event_data.has("type") or not event_data["type"] is String or (event_data["type"] as String).is_empty():
 			return error_invalid_params("Invalid event in sequence: %s" % str(event_data))
 
 	if frame_delay <= 0:

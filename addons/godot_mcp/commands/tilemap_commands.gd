@@ -33,7 +33,7 @@ func _not_found_result(node_path: String) -> Dictionary:
 
 func _get_single_layer(tilemap: Node, params: Dictionary) -> Array:
 	if tilemap is TileMapLayer:
-		if params.has("layer") and int(params["layer"]) != 0:
+		if params.has("layer") and optional_int(params, "layer") != 0:
 			return [0, error_invalid_params("layer only applies to deprecated TileMap nodes; TileMapLayer has one implicit layer")]
 		return [0, null]
 
@@ -120,12 +120,12 @@ func _tilemap_set_cell(params: Dictionary) -> Dictionary:
 		return layer_result[1]
 	var layer: int = layer_result[0]
 
-	var x: int = int(params.get("x", 0))
-	var y: int = int(params.get("y", 0))
-	var source_id: int = int(params.get("source_id", 0))
-	var atlas_x: int = int(params.get("atlas_x", 0))
-	var atlas_y: int = int(params.get("atlas_y", 0))
-	var alternative: int = int(params.get("alternative", 0))
+	var x: int = optional_int(params, "x", 0)
+	var y: int = optional_int(params, "y", 0)
+	var source_id: int = optional_int(params, "source_id", 0)
+	var atlas_x: int = optional_int(params, "atlas_x", 0)
+	var atlas_y: int = optional_int(params, "atlas_y", 0)
+	var alternative: int = optional_int(params, "alternative", 0)
 
 	var coords := Vector2i(x, y)
 	var old_cells := [_capture_cell(tilemap, layer, coords)]
@@ -155,14 +155,14 @@ func _tilemap_fill_rect(params: Dictionary) -> Dictionary:
 		return layer_result[1]
 	var layer: int = layer_result[0]
 
-	var x1: int = int(params.get("x1", 0))
-	var y1: int = int(params.get("y1", 0))
-	var x2: int = int(params.get("x2", 0))
-	var y2: int = int(params.get("y2", 0))
-	var source_id: int = int(params.get("source_id", 0))
-	var atlas_x: int = int(params.get("atlas_x", 0))
-	var atlas_y: int = int(params.get("atlas_y", 0))
-	var alternative: int = int(params.get("alternative", 0))
+	var x1: int = optional_int(params, "x1", 0)
+	var y1: int = optional_int(params, "y1", 0)
+	var x2: int = optional_int(params, "x2", 0)
+	var y2: int = optional_int(params, "y2", 0)
+	var source_id: int = optional_int(params, "source_id", 0)
+	var atlas_x: int = optional_int(params, "atlas_x", 0)
+	var atlas_y: int = optional_int(params, "atlas_y", 0)
+	var alternative: int = optional_int(params, "alternative", 0)
 
 	var count := 0
 	var old_cells: Array = []
@@ -198,8 +198,8 @@ func _tilemap_get_cell(params: Dictionary) -> Dictionary:
 		return layer_result[1]
 	var layer: int = layer_result[0]
 
-	var x: int = int(params.get("x", 0))
-	var y: int = int(params.get("y", 0))
+	var x: int = optional_int(params, "x", 0)
+	var y: int = optional_int(params, "y", 0)
 	var coords := Vector2i(x, y)
 
 	var source_id := _get_cell_source_id(tilemap, layer, coords)

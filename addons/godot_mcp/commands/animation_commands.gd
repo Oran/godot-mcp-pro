@@ -58,8 +58,8 @@ func _create_animation(params: Dictionary) -> Dictionary:
 	if player == null:
 		return error_not_found("AnimationPlayer at '%s'" % node_path)
 
-	var length: float = float(params.get("length", 1.0))
-	var loop_mode: int = int(params.get("loop_mode", 0))  # 0=none, 1=linear, 2=pingpong
+	var length: float = optional_float(params, "length", 1.0)
+	var loop_mode: int = optional_int(params, "loop_mode", 0)  # 0=none, 1=linear, 2=pingpong
 
 	var anim := Animation.new()
 	anim.length = length
@@ -161,11 +161,11 @@ func _set_animation_keyframe(params: Dictionary) -> Dictionary:
 	if anim == null:
 		return error_not_found("Animation '%s'" % anim_name)
 
-	var track_index: int = int(params.get("track_index", 0))
+	var track_index: int = optional_int(params, "track_index", 0)
 	if track_index < 0 or track_index >= anim.get_track_count():
 		return error_invalid_params("Invalid track_index: %d" % track_index)
 
-	var time: float = float(params.get("time", 0.0))
+	var time: float = optional_float(params, "time", 0.0)
 	var value = params.get("value")
 
 	# Parse value string for common types
@@ -177,7 +177,7 @@ func _set_animation_keyframe(params: Dictionary) -> Dictionary:
 			if parsed != null:
 				value = parsed
 
-	var easing: float = float(params.get("easing", 1.0))
+	var easing: float = optional_float(params, "easing", 1.0)
 	var old_key_idx := _find_animation_key_at_time(anim, track_index, time)
 	var had_old_key := old_key_idx >= 0
 	var old_value: Variant = anim.track_get_key_value(track_index, old_key_idx) if had_old_key else null

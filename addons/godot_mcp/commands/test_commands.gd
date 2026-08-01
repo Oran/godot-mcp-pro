@@ -252,7 +252,7 @@ func _run_stress_test(params: Dictionary) -> Dictionary:
 	## Run rapid random inputs for N seconds and check for crashes.
 	## Returns frame count, timing, and any errors from game output.
 
-	var duration: float = float(params.get("duration", 5.0))
+	var duration: float = optional_float(params, "duration", 5.0)
 	if duration <= 0 or duration > 60:
 		return error_invalid_params("Duration must be between 0 and 60 seconds")
 

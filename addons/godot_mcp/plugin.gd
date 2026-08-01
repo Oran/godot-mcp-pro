@@ -22,6 +22,8 @@ var auto_dismiss_dialogs: bool = false
 var _session_injected_autoloads: Array[String] = []
 
 func _enter_tree() -> void:
+	_register_project_settings()
+
 	# Create command router
 	command_router = preload("res://addons/godot_mcp/command_router.gd").new()
 	command_router.name = "MCPCommandRouter"
@@ -72,28 +74,74 @@ func _exit_tree() -> void:
 	print("[MCP] Godot MCP Pro stopped")
 
 
+## Declares the opt-in connection token setting so it is discoverable in
+## Project Settings. Defaults to false, so nothing changes unless a user turns
+## it on — see SECURITY.md for what it does and does not protect against.
+func _register_project_settings() -> void:
+	const KEY := "godot_mcp_pro/require_connection_token"
+	if not ProjectSettings.has_setting(KEY):
+		ProjectSettings.set_setting(KEY, false)
+	ProjectSettings.set_initial_value(KEY, false)
+	ProjectSettings.add_property_info({
+		"name": KEY,
+		"type": TYPE_BOOL,
+		"hint": PROPERTY_HINT_NONE,
+		"hint_string": "Require MCP servers to present the token in user://mcp_auth_token before accepting commands.",
+	})
+	ProjectSettings.set_as_basic(KEY, true)
+
+
 func _inject_autoloads() -> void:
 	_session_injected_autoloads.clear()
 	var changed := false
 	for entry: Array in _MCP_AUTOLOADS:
 		var key: String = entry[0]
 		var script: String = entry[1]
+		var wanted := "*" + script
 		if not ProjectSettings.has_setting(key):
-			ProjectSettings.set_setting(key, "*" + script)
+			ProjectSettings.set_setting(key, wanted)
 			_session_injected_autoloads.append(key)
 			changed = true
+			continue
+
+		var existing := str(ProjectSettings.get_setting(key))
+		if existing == wanted or existing == script:
+			# Left behind by a previous session that crashed or was killed
+			# before _exit_tree ran. Reclaim it, or it stays in project.godot
+			# forever and logs "Can't autoload" once the addon is gone.
+			_session_injected_autoloads.append(key)
+		else:
+			# A different script owns this name. Injecting would clobber the
+			# project's own autoload, and not injecting leaves the matching
+			# MCP service unavailable — so say which it is.
+			push_warning(
+				"[MCP] Autoload '%s' already points at '%s', not the MCP service. Leaving it alone; the features backed by %s will not work." % [
+					key, existing, script.get_file()
+				]
+			)
 	if changed:
 		ProjectSettings.save()
 
 
 func _remove_autoloads() -> void:
-	# Only remove autoloads that THIS session injected.
+	# Only remove autoloads that THIS session injected or reclaimed.
 	# Pre-existing project-owned autoloads are preserved.
 	var changed := false
+	var wanted_by_key := {}
+	for entry: Array in _MCP_AUTOLOADS:
+		wanted_by_key[entry[0]] = entry[1]
+
 	for key: String in _session_injected_autoloads:
-		if ProjectSettings.has_setting(key):
-			ProjectSettings.set_setting(key, null)
-			changed = true
+		if not ProjectSettings.has_setting(key):
+			continue
+		var script: String = wanted_by_key.get(key, "")
+		var current := str(ProjectSettings.get_setting(key))
+		# The user may have repointed it at their own script mid-session;
+		# removing that would delete their work rather than ours.
+		if current != "*" + script and current != script:
+			continue
+		ProjectSettings.set_setting(key, null)
+		changed = true
 	_session_injected_autoloads.clear()
 	if changed:
 		ProjectSettings.save()

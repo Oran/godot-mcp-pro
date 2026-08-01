@@ -42,19 +42,47 @@ func _ready() -> void:
 
 
 func setup(ws_server: Node, cmd_router: Node = null) -> void:
+	# A second setup() — plugin reload, or re-entering the tree — used to stack
+	# another set of connections on top of the previous server's, so callbacks
+	# fired twice and connect() could error on a repeat.
+	_disconnect_server_signals()
+
 	websocket_server = ws_server
 	command_router = cmd_router
 
-	if websocket_server:
+	if is_instance_valid(websocket_server):
 		websocket_server.client_connected.connect(_on_client_connected)
 		websocket_server.client_disconnected.connect(_on_client_disconnected)
+		# Neither signal is guaranteed on an older/newer server node; reaching
+		# for a missing one raises instead of simply skipping it.
 		if websocket_server.has_signal("command_completed"):
 			websocket_server.command_completed.connect(_on_command_completed)
-		else:
+		elif websocket_server.has_signal("command_executed"):
 			websocket_server.command_executed.connect(_on_command_executed)
 
 	if command_router:
 		_populate_tools_list()
+
+
+## Drops any connections made by a previous setup() call.
+func _disconnect_server_signals() -> void:
+	if not is_instance_valid(websocket_server):
+		return
+	var pairs := [
+		["client_connected", _on_client_connected],
+		["client_disconnected", _on_client_disconnected],
+		["command_completed", _on_command_completed],
+		["command_executed", _on_command_executed],
+	]
+	for pair: Array in pairs:
+		var sig: String = pair[0]
+		var callable: Callable = pair[1]
+		if websocket_server.has_signal(sig) and websocket_server.is_connected(sig, callable):
+			websocket_server.disconnect(sig, callable)
+
+
+func _exit_tree() -> void:
+	_disconnect_server_signals()
 
 
 func _build_ui() -> void:
@@ -210,7 +238,9 @@ func _populate_tools_list() -> void:
 
 
 func _process(_delta: float) -> void:
-	if not websocket_server:
+	# A freed Node is still truthy in GDScript, so after a plugin reload this
+	# ran every frame against a dangling instance.
+	if not is_instance_valid(websocket_server):
 		return
 
 	var count: int = websocket_server.get_client_count()

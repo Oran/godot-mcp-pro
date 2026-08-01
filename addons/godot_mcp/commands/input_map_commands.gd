@@ -51,7 +51,7 @@ func _set_input_action(params: Dictionary) -> Dictionary:
 		return error_invalid_params("'events' array is required")
 	var event_defs: Array = params["events"]
 
-	var deadzone: float = float(params.get("deadzone", 0.5))
+	var deadzone: float = optional_float(params, "deadzone", 0.5)
 
 	# Build the events array
 	var events: Array[InputEvent] = []

@@ -139,14 +139,19 @@ func _stop_recording(params: Dictionary) -> Dictionary:
 
 
 func _replay_recording(params: Dictionary) -> Dictionary:
-	if not params.has("events") or not params["events"] is Array:
-		return error_invalid_params("'events' array is required")
-	var speed: float = float(params.get("speed", 1.0))
+	# `for e: Dictionary in ...` raises on the first non-Dictionary entry,
+	# aborting the handler before it can answer.
+	var events_guard := require_dictionary_array(params, "events")
+	if not events_guard.is_empty():
+		return events_guard
+	var speed: float = optional_float(params, "speed", 1.0)
 
 	# Calculate timeout based on event duration
 	var max_time_ms: int = 0
 	for event_data: Dictionary in params["events"]:
-		var t: int = int(event_data.get("time_ms", 0))
+		# time_ms comes straight from JSON; int() raises on an array or object.
+		var raw_t: Variant = event_data.get("time_ms", 0)
+		var t: int = int(raw_t) if (raw_t is int or raw_t is float or raw_t is bool) else 0
 		if t > max_time_ms:
 			max_time_ms = t
 	var timeout := (max_time_ms / 1000.0 / speed) + 5.0
@@ -215,7 +220,7 @@ func _wait_for_node(params: Dictionary) -> Dictionary:
 	if result[1] != null:
 		return result[1]
 
-	var timeout: float = float(params.get("timeout", 5.0))
+	var timeout: float = optional_float(params, "timeout", 5.0)
 	var poll_frames: int = optional_int(params, "poll_frames", 5)
 
 	return await _send_game_command("wait_for_node", {
@@ -231,7 +236,7 @@ func _find_nearby_nodes(params: Dictionary) -> Dictionary:
 
 	var cmd_params: Dictionary = {"position": params["position"]}
 	if params.has("radius"):
-		cmd_params["radius"] = float(params["radius"])
+		cmd_params["radius"] = optional_float(params, "radius")
 	var type_filter: String = optional_string(params, "type_filter")
 	if not type_filter.is_empty():
 		cmd_params["type_filter"] = type_filter
@@ -239,7 +244,7 @@ func _find_nearby_nodes(params: Dictionary) -> Dictionary:
 	if not group_filter.is_empty():
 		cmd_params["group_filter"] = group_filter
 	if params.has("max_results"):
-		cmd_params["max_results"] = int(params["max_results"])
+		cmd_params["max_results"] = optional_int(params, "max_results")
 
 	return await _send_game_command("find_nearby_nodes", cmd_params)
 
@@ -256,7 +261,7 @@ func _navigate_to(params: Dictionary) -> Dictionary:
 	if not camera_path.is_empty():
 		cmd_params["camera_path"] = camera_path
 	if params.has("move_speed"):
-		cmd_params["move_speed"] = float(params["move_speed"])
+		cmd_params["move_speed"] = optional_float(params, "move_speed")
 
 	return await _send_game_command("navigate_to", cmd_params)
 
@@ -273,16 +278,16 @@ func _move_to(params: Dictionary) -> Dictionary:
 	if not camera_path.is_empty():
 		cmd_params["camera_path"] = camera_path
 	if params.has("arrival_radius"):
-		cmd_params["arrival_radius"] = float(params["arrival_radius"])
+		cmd_params["arrival_radius"] = optional_float(params, "arrival_radius")
 	if params.has("timeout"):
-		cmd_params["timeout"] = float(params["timeout"])
+		cmd_params["timeout"] = optional_float(params, "timeout")
 	if params.has("run"):
-		cmd_params["run"] = bool(params["run"])
+		cmd_params["run"] = optional_bool(params, "run")
 	if params.has("look_at_target"):
-		cmd_params["look_at_target"] = bool(params["look_at_target"])
+		cmd_params["look_at_target"] = optional_bool(params, "look_at_target")
 
 	# Dynamic timeout: game-side timeout + overhead for IPC polling
-	var game_timeout: float = float(params.get("timeout", 15.0))
+	var game_timeout: float = optional_float(params, "timeout", 15.0)
 	var ipc_timeout: float = game_timeout + 5.0
 
 	return await _send_game_command("move_to", cmd_params, ipc_timeout)

@@ -67,11 +67,60 @@ func optional_bool(params: Dictionary, key: String, default: bool = false) -> bo
 	return default
 
 
-## Get optional int param with default
+## Get optional int param with default.
+##
+## Only converts from types that have a meaningful integer value. int() raises
+## on null, arrays and dictionaries — and a raise inside a command handler
+## aborts the coroutine, so the caller gets no response at all and waits out
+## its full timeout for what is really one bad parameter.
 func optional_int(params: Dictionary, key: String, default: int = 0) -> int:
-	if params.has(key):
-		return int(params[key])
+	if not params.has(key):
+		return default
+	var value: Variant = params[key]
+	if value is int:
+		return value
+	if value is float:
+		return int(value)
+	if value is bool:
+		return 1 if value else 0
+	if value is String and (value as String).is_valid_int():
+		return (value as String).to_int()
 	return default
+
+
+## Get optional float param with default. Same reasoning as optional_int:
+## float() raises on null, arrays and dictionaries, and a raise inside a
+## handler means the caller never gets a response.
+func optional_float(params: Dictionary, key: String, default: float = 0.0) -> float:
+	if not params.has(key):
+		return default
+	var value: Variant = params[key]
+	if value is float:
+		return value
+	if value is int:
+		return float(value)
+	if value is bool:
+		return 1.0 if value else 0.0
+	if value is String and (value as String).is_valid_float():
+		return (value as String).to_float()
+	return default
+
+
+## Validates that every entry of `params[key]` is a Dictionary.
+##
+## `for entry: Dictionary in some_array` raises on the first non-Dictionary
+## element, which aborts the handler before it can answer. Returns {} when the
+## array is usable, or an error dictionary naming the offending index.
+func require_dictionary_array(params: Dictionary, key: String) -> Dictionary:
+	if not params.has(key) or not params[key] is Array:
+		return error_invalid_params("'%s' array is required" % key)
+	var items: Array = params[key]
+	for i in items.size():
+		if not items[i] is Dictionary:
+			return error_invalid_params(
+				"'%s'[%d] must be an object, got %s" % [key, i, type_string(typeof(items[i]))]
+			)
+	return {}
 
 
 ## Get the game process's user data directory.
@@ -127,6 +176,38 @@ func normalize_project_path(path: String) -> String:
 	return ProjectSettings.localize_path(path).simplify_path()
 
 
+## Compares two project paths for the purpose of a protective guard.
+##
+## Windows and macOS have case-insensitive filesystems, so "res://Player.gd"
+## and "res://player.gd" are the same file while comparing unequal. An exact
+## match would let a differently-cased alias slip past the open-resource
+## guards and overwrite the file the user has open. These guards are meant to
+## refuse when in doubt, so the comparison is case-insensitive: at worst a
+## write is refused that would have been safe, which the caller can override.
+func paths_match(a: String, b: String) -> bool:
+	return a.nocasecmp_to(b) == 0
+
+
+## Refuses a write whose path does not carry one of the expected extensions.
+##
+## Without this, create_shader / create_theme / create_resource and friends
+## will happily ResourceSaver.save over whatever the path points at — a
+## mistyped destination silently destroys a script or an image, with no undo.
+## `what` names the tool's own file kind for the message.
+func guard_expected_extension(path: String, allowed: Array, what: String) -> Dictionary:
+	var ext := path.get_extension().to_lower()
+	if ext in allowed:
+		return {}
+	var pretty: Array = []
+	for e: String in allowed:
+		pretty.append("." + e)
+	return error_invalid_params(
+		"'%s' does not look like %s (expected %s). Refusing to write, since this would overwrite whatever is at that path." % [
+			path, what, ", ".join(pretty)
+		]
+	)
+
+
 func is_scene_resource_path(path: String) -> bool:
 	var ext := path.get_extension().to_lower()
 	return ext == "tscn" or ext == "scn"
@@ -152,14 +233,17 @@ func is_scene_path_open(path: String) -> bool:
 	var normalized := normalize_project_path(path)
 	if normalized.is_empty():
 		return false
-	return normalized in get_open_scene_paths()
+	for open_path: String in get_open_scene_paths():
+		if paths_match(open_path, normalized):
+			return true
+	return false
 
 
 func is_active_scene_path(path: String) -> bool:
 	var root := get_edited_root()
 	if root == null:
 		return false
-	return normalize_project_path(root.scene_file_path) == normalize_project_path(path)
+	return paths_match(normalize_project_path(root.scene_file_path), normalize_project_path(path))
 
 
 func guard_offline_scene_save(path: String) -> Dictionary:
@@ -198,11 +282,37 @@ func unwrap_game_result(result: Dictionary) -> Dictionary:
 
 
 ## Shared IPC helper: send a command to the running game and await its response.
+## Only one game command may be in flight: the request and response files are
+## shared, so two at once would overwrite each other's request and consume each
+## other's reply. Static, because each command file has its own instance.
+static var _game_command_busy := false
+static var _game_command_seq := 0
+
+
 func send_game_command(command: String, params: Dictionary = {}, timeout_sec: float = 5.0) -> Dictionary:
 	var ei := get_editor()
 	if not ei.is_playing_scene():
 		return error(-32000, "No scene is currently playing", {"suggestion": "Use play_scene first"})
 
+	# Wait for any in-flight game command rather than trampling it.
+	var waited := 0.0
+	var queue_limit := timeout_sec + 5.0
+	while _game_command_busy and waited < queue_limit:
+		await get_tree().create_timer(0.05).timeout
+		waited += 0.05
+	if _game_command_busy:
+		return error(-32000, "Another game command is still running", {
+			"suggestion": "Retry once it finishes; game commands are serialised because they share one request channel.",
+		})
+
+	_game_command_busy = true
+	var result := await _send_game_command_locked(command, params, timeout_sec)
+	_game_command_busy = false
+	return result
+
+
+func _send_game_command_locked(command: String, params: Dictionary, timeout_sec: float) -> Dictionary:
+	var ei := get_editor()
 	var user_dir := get_game_user_dir()
 	var request_path := user_dir + "/mcp_game_request"
 	var response_path := user_dir + "/mcp_game_response"
@@ -211,8 +321,11 @@ func send_game_command(command: String, params: Dictionary = {}, timeout_sec: fl
 	if FileAccess.file_exists(response_path):
 		DirAccess.remove_absolute(response_path)
 
-	# Write request
-	var request_data := JSON.stringify({"command": command, "params": params})
+	# Write request, tagged so a late reply from a command that already timed
+	# out is recognised and discarded instead of being read as this one's.
+	_game_command_seq += 1
+	var request_id := "%d-%d" % [Time.get_ticks_msec(), _game_command_seq]
+	var request_data := JSON.stringify({"command": command, "params": params, "request_id": request_id})
 	var req := FileAccess.open(request_path, FileAccess.WRITE)
 	if req == null:
 		return error_internal("Could not create game request file")
@@ -257,6 +370,12 @@ func send_game_command(command: String, params: Dictionary = {}, timeout_sec: fl
 	if parsed == null or not parsed is Dictionary:
 		return error_internal("Invalid response JSON from game")
 
+	var reply_id := str(parsed.get("request_id", ""))
+	if not reply_id.is_empty() and reply_id != request_id:
+		return error_internal(
+			"Discarded a stale game response belonging to an earlier command. Retry this one."
+		)
+
 	if parsed.has("error"):
 		return error(-32000, str(parsed["error"]))
 
@@ -280,7 +399,7 @@ func is_text_resource_open_in_script_editor(path: String) -> bool:
 	for open_resource in script_editor.get_open_scripts():
 		if open_resource is Resource:
 			var resource_path := normalize_project_path((open_resource as Resource).resource_path)
-			if resource_path == target:
+			if paths_match(resource_path, target):
 				return true
 	return false
 
