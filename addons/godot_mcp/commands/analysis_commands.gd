@@ -34,35 +34,60 @@ func _find_unused_resources(params: Dictionary) -> Dictionary:
 	var ref_files: Array = []
 	_collect_files_by_ext(path, ref_extensions, ref_files, include_addons)
 
-	# Step 3: Build a set of all referenced paths
+	# Step 3: Build a set of all referenced paths (both res:// and uid:// forms)
 	var referenced: Dictionary = {}  # path -> true
 	for ref_file in ref_files:
 		var content := _read_file_text(ref_file as String)
 		if content.is_empty():
 			continue
-		# Find res:// paths in file content
-		var idx := 0
-		while idx < content.length():
-			var found := content.find("res://", idx)
-			if found == -1:
-				break
-			# Extract the path (up to quote, space, or end of line)
-			var end := found + 6
-			while end < content.length():
-				var c := content[end]
-				if c == '"' or c == "'" or c == ' ' or c == '\n' or c == '\r' or c == ')' or c == ']' or c == '}':
+		for prefix: String in ["res://", "uid://"]:
+			var idx := 0
+			while idx < content.length():
+				var found := content.find(prefix, idx)
+				if found == -1:
 					break
-				end += 1
-			var ref_path := content.substr(found, end - found)
-			referenced[ref_path] = true
-			idx = end
+				# Extract the path (up to quote, space, or end of line)
+				var end := found + prefix.length()
+				while end < content.length():
+					var c := content[end]
+					if c == '"' or c == "'" or c == ' ' or c == '\n' or c == '\r' or c == ')' or c == ']' or c == '}':
+						break
+					end += 1
+				var ref_path := content.substr(found, end - found)
+				if ref_path.begins_with("uid://"):
+					# Map uid:// back to its res:// path. Skip self-references:
+					# .tres/.tscn headers carry the file's OWN uid, which must
+					# not count as the file being referenced by someone else.
+					var uid := ResourceUID.text_to_id(ref_path)
+					if uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid):
+						var uid_path := ResourceUID.get_id_path(uid)
+						if uid_path != str(ref_file):
+							referenced[uid_path] = true
+				else:
+					referenced[ref_path] = true
+				idx = end
+
+	# Step 3b: Seed references held by the engine via ProjectSettings
+	# (main scene, audio bus layout, icon, autoloads…) — these may be default
+	# values that never appear as literals in project.godot
+	for setting in ProjectSettings.get_property_list():
+		var setting_name: String = setting["name"]
+		var value: Variant = ProjectSettings.get_setting(setting_name) if ProjectSettings.has_setting(setting_name) else null
+		if value is String:
+			var s: String = value
+			s = s.trim_prefix("*")  # autoload paths are prefixed with '*'
+			if s.begins_with("res://"):
+				referenced[s] = true
+			elif s.begins_with("uid://"):
+				var uid := ResourceUID.text_to_id(s)
+				if uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid):
+					referenced[ResourceUID.get_id_path(uid)] = true
 
 	# Step 4: Find unreferenced resources
 	var unused: Array = []
 	for res_path in all_resources:
 		var p: String = res_path
 		if not referenced.has(p):
-			# Also check without uid:// prefix variants — some references use uid
 			unused.append(p)
 
 	return success({
@@ -102,24 +127,28 @@ func _collect_signal_data(node: Node, root: Node, out: Array) -> void:
 	for sig in node.get_signal_list():
 		var sig_name: String = sig["name"]
 		var connections := node.get_signal_connection_list(sig_name)
-		if connections.size() > 0:
-			var targets: Array = []
-			for conn in connections:
-				var callable: Callable = conn["callable"]
-				var target_node: Node = callable.get_object() as Node
-				var target_path := ""
-				if target_node != null:
-					target_path = str(root.get_path_to(target_node))
-				targets.append({
-					"target_node": target_path,
-					"method": callable.get_method(),
-				})
-				# Also record on the target side
-				signals_connected_to.append({
-					"from_node": node_path,
-					"signal": sig_name,
-					"method": callable.get_method(),
-				})
+		var targets: Array = []
+		for conn in connections:
+			# Skip editor-internal bookkeeping connections — only persistent
+			# (scene-serialized) connections are user-relevant
+			if int(conn.get("flags", 0)) & Object.CONNECT_PERSIST == 0:
+				continue
+			var callable: Callable = conn["callable"]
+			var target_node: Node = callable.get_object() as Node
+			# Skip targets outside the edited scene (editor dock nodes)
+			if target_node == null or (target_node != root and not root.is_ancestor_of(target_node)):
+				continue
+			targets.append({
+				"target_node": str(root.get_path_to(target_node)),
+				"method": callable.get_method(),
+			})
+			# Also record on the target side
+			signals_connected_to.append({
+				"from_node": node_path,
+				"signal": sig_name,
+				"method": callable.get_method(),
+			})
+		if targets.size() > 0:
 			signals_emitted.append({
 				"signal": sig_name,
 				"targets": targets,

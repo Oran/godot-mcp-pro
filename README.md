@@ -1,6 +1,6 @@
 # Godot MCP Pro
 
-Premium MCP (Model Context Protocol) server for AI-powered Godot game development. Connects AI assistants like Claude directly to your Godot editor with **172 powerful tools**.
+Premium MCP (Model Context Protocol) server for AI-powered Godot game development. Connects AI assistants like Claude directly to your Godot editor with **175 powerful tools**.
 
 ## Architecture
 
@@ -63,9 +63,9 @@ Godot MCP Pro offers four modes to fit any client's tool limit:
 
 | Mode | Tools | Best For |
 |------|-------|----------|
-| **Full** (default) | 172 | Claude Code, Cline, VS Code Copilot, Cursor |
-| **3D** (`--3d`) | 100 | Antigravity and other 100-tool-limit clients needing 3D |
-| **Lite** (`--lite`) | 81 | Windsurf, JetBrains Junie, Gemini CLI |
+| **Full** (default) | 175 | Claude Code, Cline, VS Code Copilot, Cursor |
+| **3D** (`--3d`) | 103 | Antigravity and other 100-tool-limit clients needing 3D |
+| **Lite** (`--lite`) | 84 | Windsurf, JetBrains Junie, Gemini CLI |
 | **Minimal** (`--minimal`) | 35 | OpenCode, local LLMs with small context |
 
 ```json
@@ -133,7 +133,7 @@ The CLI connects directly to the Godot editor plugin via WebSocket. It requires:
 
 Open your Godot project with the plugin enabled, then use Claude Code to interact with the editor.
 
-## All 172 Tools
+## All 175 Tools
 
 ### Project Tools (7)
 | Tool | Description |
@@ -159,7 +159,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `stop_scene` | Stop running scene |
 | `save_scene` | Save current scene to disk |
 
-### Node Tools (14)
+### Node Tools (17)
 | Tool | Description |
 |------|-------------|
 | `add_node` | Add node with type and properties |
@@ -176,6 +176,9 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | `get_node_groups` | Get groups a node belongs to |
 | `set_node_groups` | Set node group membership |
 | `find_nodes_in_group` | Find all nodes in a group |
+| `get_editor_selection` | Get currently selected scene nodes |
+| `select_nodes` | Select, focus, and inspect scene nodes |
+| `clear_editor_selection` | Clear the editor scene selection |
 
 ### Script Tools (8)
 | Tool | Description |
@@ -439,7 +442,7 @@ Open your Godot project with the plugin enabled, then use Claude Code to interac
 | Material | 0 | 0 | 0 | 2 | 0 | 0 | 0 |
 | Other | 0 | 0 | 9 | 5 | 5 | 2 | 1 |
 | Android Deploy | **3** | 0 | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **172** | ~30 | **32** | **39** | **13** | **19** | **10** |
+| **Total** | **175** | ~30 | **32** | **39** | **13** | **19** | **10** |
 
 ### Feature Matrix
 

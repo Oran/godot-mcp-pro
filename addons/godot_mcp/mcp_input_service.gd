@@ -10,6 +10,12 @@ var _sequence_frames_waited: int = 0
 
 
 func _ready() -> void:
+	# Editor-driven service only — disable it in exported builds rather than
+	# stat'ing user:// every frame in players' games.
+	if not OS.has_feature("editor") or OS.has_environment("GODOT_MCP_HEADLESS_CHILD"):
+		process_mode = Node.PROCESS_MODE_DISABLED
+		set_process(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 

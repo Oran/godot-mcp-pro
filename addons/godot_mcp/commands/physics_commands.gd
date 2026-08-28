@@ -84,20 +84,20 @@ func _setup_collision(params: Dictionary) -> Dictionary:
 		match shape_name:
 			"rectangle", "rect":
 				shape = RectangleShape2D.new()
-				var w: float = float(params.get("width", 32.0))
-				var h: float = float(params.get("height", 32.0))
+				var w: float = optional_float(params, "width", 32.0)
+				var h: float = optional_float(params, "height", 32.0)
 				shape.size = Vector2(w, h)
 			"circle":
 				shape = CircleShape2D.new()
-				shape.radius = float(params.get("radius", 16.0))
+				shape.radius = optional_float(params, "radius", 16.0)
 			"capsule":
 				shape = CapsuleShape2D.new()
-				shape.radius = float(params.get("radius", 16.0))
-				shape.height = float(params.get("height", 40.0))
+				shape.radius = optional_float(params, "radius", 16.0)
+				shape.height = optional_float(params, "height", 40.0)
 			"segment":
 				shape = SegmentShape2D.new()
-				shape.a = Vector2(float(params.get("ax", 0.0)), float(params.get("ay", 0.0)))
-				shape.b = Vector2(float(params.get("bx", 32.0)), float(params.get("by", 0.0)))
+				shape.a = Vector2(optional_float(params, "ax", 0.0), optional_float(params, "ay", 0.0))
+				shape.b = Vector2(optional_float(params, "bx", 32.0), optional_float(params, "by", 0.0))
 			"custom":
 				# ConvexPolygonShape2D — expects "points" as array of [x,y] pairs
 				shape = ConvexPolygonShape2D.new()
@@ -139,21 +139,21 @@ func _setup_collision(params: Dictionary) -> Dictionary:
 		match shape_name:
 			"box", "rectangle", "rect":
 				shape = BoxShape3D.new()
-				var sx: float = float(params.get("width", 1.0))
-				var sy: float = float(params.get("height", 1.0))
-				var sz: float = float(params.get("depth", 1.0))
+				var sx: float = optional_float(params, "width", 1.0)
+				var sy: float = optional_float(params, "height", 1.0)
+				var sz: float = optional_float(params, "depth", 1.0)
 				shape.size = Vector3(sx, sy, sz)
 			"sphere", "circle":
 				shape = SphereShape3D.new()
-				shape.radius = float(params.get("radius", 0.5))
+				shape.radius = optional_float(params, "radius", 0.5)
 			"capsule":
 				shape = CapsuleShape3D.new()
-				shape.radius = float(params.get("radius", 0.5))
-				shape.height = float(params.get("height", 2.0))
+				shape.radius = optional_float(params, "radius", 0.5)
+				shape.height = optional_float(params, "height", 2.0)
 			"cylinder":
 				shape = CylinderShape3D.new()
-				shape.radius = float(params.get("radius", 0.5))
-				shape.height = float(params.get("height", 2.0))
+				shape.radius = optional_float(params, "radius", 0.5)
+				shape.height = optional_float(params, "height", 2.0)
 			"convex", "custom":
 				shape = ConvexPolygonShape3D.new()
 				var points_data: Array = params.get("points", [])
@@ -353,8 +353,8 @@ func _add_raycast(params: Dictionary) -> Dictionary:
 		ray.collide_with_bodies = collide_with_bodies
 		ray.hit_from_inside = hit_from_inside
 
-		var tx: float = float(params.get("target_x", 0.0))
-		var ty: float = float(params.get("target_y", 50.0))
+		var tx: float = optional_float(params, "target_x", 0.0)
+		var ty: float = optional_float(params, "target_y", 50.0)
 		ray.target_position = Vector2(tx, ty)
 
 		undo_redo.create_action("MCP: Add RayCast2D to %s" % node.name)
@@ -380,9 +380,9 @@ func _add_raycast(params: Dictionary) -> Dictionary:
 		ray.collide_with_bodies = collide_with_bodies
 		ray.hit_from_inside = hit_from_inside
 
-		var tx: float = float(params.get("target_x", 0.0))
-		var ty: float = float(params.get("target_y", -1.0))
-		var tz: float = float(params.get("target_z", 0.0))
+		var tx: float = optional_float(params, "target_x", 0.0)
+		var ty: float = optional_float(params, "target_y", -1.0)
+		var tz: float = optional_float(params, "target_z", 0.0)
 		ray.target_position = Vector3(tx, ty, tz)
 
 		undo_redo.create_action("MCP: Add RayCast3D to %s" % node.name)
@@ -423,28 +423,28 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 		# CharacterBody properties
 		if params.has("floor_stop_on_slope"):
 			var old_val: bool = node.floor_stop_on_slope
-			var new_val: bool = bool(params["floor_stop_on_slope"])
+			var new_val: bool = optional_bool(params, "floor_stop_on_slope")
 			undo_redo.add_do_property(node, "floor_stop_on_slope", new_val)
 			undo_redo.add_undo_property(node, "floor_stop_on_slope", old_val)
 			applied["floor_stop_on_slope"] = new_val
 
 		if params.has("floor_max_angle"):
 			var old_val: float = node.floor_max_angle
-			var new_val: float = float(params["floor_max_angle"])
+			var new_val: float = optional_float(params, "floor_max_angle")
 			undo_redo.add_do_property(node, "floor_max_angle", new_val)
 			undo_redo.add_undo_property(node, "floor_max_angle", old_val)
 			applied["floor_max_angle"] = new_val
 
 		if params.has("floor_snap_length"):
 			var old_val: float = node.floor_snap_length
-			var new_val: float = float(params["floor_snap_length"])
+			var new_val: float = optional_float(params, "floor_snap_length")
 			undo_redo.add_do_property(node, "floor_snap_length", new_val)
 			undo_redo.add_undo_property(node, "floor_snap_length", old_val)
 			applied["floor_snap_length"] = new_val
 
 		if params.has("wall_min_slide_angle"):
 			var old_val: float = node.wall_min_slide_angle
-			var new_val: float = float(params["wall_min_slide_angle"])
+			var new_val: float = optional_float(params, "wall_min_slide_angle")
 			undo_redo.add_do_property(node, "wall_min_slide_angle", new_val)
 			undo_redo.add_undo_property(node, "wall_min_slide_angle", old_val)
 			applied["wall_min_slide_angle"] = new_val
@@ -459,7 +459,7 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 					"floating":
 						mode_val = CharacterBody2D.MOTION_MODE_FLOATING
 					_:
-						mode_val = int(params["motion_mode"])
+						mode_val = optional_int(params, "motion_mode")
 			else:
 				match mode_str.to_lower():
 					"grounded":
@@ -467,7 +467,7 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 					"floating":
 						mode_val = CharacterBody3D.MOTION_MODE_FLOATING
 					_:
-						mode_val = int(params["motion_mode"])
+						mode_val = optional_int(params, "motion_mode")
 			var old_val: int = node.motion_mode
 			undo_redo.add_do_property(node, "motion_mode", mode_val)
 			undo_redo.add_undo_property(node, "motion_mode", old_val)
@@ -475,14 +475,14 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 
 		if params.has("max_slides"):
 			var old_val: int = node.max_slides
-			var new_val: int = int(params["max_slides"])
+			var new_val: int = optional_int(params, "max_slides")
 			undo_redo.add_do_property(node, "max_slides", new_val)
 			undo_redo.add_undo_property(node, "max_slides", old_val)
 			applied["max_slides"] = new_val
 
 		if params.has("slide_on_ceiling"):
 			var old_val: bool = node.slide_on_ceiling
-			var new_val: bool = bool(params["slide_on_ceiling"])
+			var new_val: bool = optional_bool(params, "slide_on_ceiling")
 			undo_redo.add_do_property(node, "slide_on_ceiling", new_val)
 			undo_redo.add_undo_property(node, "slide_on_ceiling", old_val)
 			applied["slide_on_ceiling"] = new_val
@@ -491,35 +491,35 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 		# RigidBody properties
 		if params.has("mass"):
 			var old_val: float = node.mass
-			var new_val: float = float(params["mass"])
+			var new_val: float = optional_float(params, "mass")
 			undo_redo.add_do_property(node, "mass", new_val)
 			undo_redo.add_undo_property(node, "mass", old_val)
 			applied["mass"] = new_val
 
 		if params.has("gravity_scale"):
 			var old_val: float = node.gravity_scale
-			var new_val: float = float(params["gravity_scale"])
+			var new_val: float = optional_float(params, "gravity_scale")
 			undo_redo.add_do_property(node, "gravity_scale", new_val)
 			undo_redo.add_undo_property(node, "gravity_scale", old_val)
 			applied["gravity_scale"] = new_val
 
 		if params.has("linear_damp"):
 			var old_val: float = node.linear_damp
-			var new_val: float = float(params["linear_damp"])
+			var new_val: float = optional_float(params, "linear_damp")
 			undo_redo.add_do_property(node, "linear_damp", new_val)
 			undo_redo.add_undo_property(node, "linear_damp", old_val)
 			applied["linear_damp"] = new_val
 
 		if params.has("angular_damp"):
 			var old_val: float = node.angular_damp
-			var new_val: float = float(params["angular_damp"])
+			var new_val: float = optional_float(params, "angular_damp")
 			undo_redo.add_do_property(node, "angular_damp", new_val)
 			undo_redo.add_undo_property(node, "angular_damp", old_val)
 			applied["angular_damp"] = new_val
 
 		if params.has("freeze"):
 			var old_val: bool = node.freeze
-			var new_val: bool = bool(params["freeze"])
+			var new_val: bool = optional_bool(params, "freeze")
 			undo_redo.add_do_property(node, "freeze", new_val)
 			undo_redo.add_undo_property(node, "freeze", old_val)
 			applied["freeze"] = new_val
@@ -534,7 +534,7 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 					"kinematic":
 						mode_val = RigidBody2D.FREEZE_MODE_KINEMATIC
 					_:
-						mode_val = int(params["freeze_mode"])
+						mode_val = optional_int(params, "freeze_mode")
 			else:
 				match mode_str.to_lower():
 					"static":
@@ -542,7 +542,7 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 					"kinematic":
 						mode_val = RigidBody3D.FREEZE_MODE_KINEMATIC
 					_:
-						mode_val = int(params["freeze_mode"])
+						mode_val = optional_int(params, "freeze_mode")
 			var old_val: int = node.freeze_mode
 			undo_redo.add_do_property(node, "freeze_mode", mode_val)
 			undo_redo.add_undo_property(node, "freeze_mode", old_val)
@@ -560,28 +560,28 @@ func _setup_physics_body(params: Dictionary) -> Dictionary:
 					"cast_shape":
 						ccd_val = RigidBody2D.CCD_MODE_CAST_SHAPE
 					_:
-						ccd_val = int(params["continuous_cd"])
+						ccd_val = optional_int(params, "continuous_cd")
 				var old_val: int = node.continuous_cd
 				undo_redo.add_do_property(node, "continuous_cd", ccd_val)
 				undo_redo.add_undo_property(node, "continuous_cd", old_val)
 				applied["continuous_cd"] = ccd_str
 			else:
 				var old_val: bool = node.continuous_cd
-				var new_val: bool = bool(params["continuous_cd"])
+				var new_val: bool = optional_bool(params, "continuous_cd")
 				undo_redo.add_do_property(node, "continuous_cd", new_val)
 				undo_redo.add_undo_property(node, "continuous_cd", old_val)
 				applied["continuous_cd"] = new_val
 
 		if params.has("contact_monitor"):
 			var old_val: bool = node.contact_monitor
-			var new_val: bool = bool(params["contact_monitor"])
+			var new_val: bool = optional_bool(params, "contact_monitor")
 			undo_redo.add_do_property(node, "contact_monitor", new_val)
 			undo_redo.add_undo_property(node, "contact_monitor", old_val)
 			applied["contact_monitor"] = new_val
 
 		if params.has("max_contacts_reported"):
 			var old_val: int = node.max_contacts_reported
-			var new_val: int = int(params["max_contacts_reported"])
+			var new_val: int = optional_int(params, "max_contacts_reported")
 			undo_redo.add_do_property(node, "max_contacts_reported", new_val)
 			undo_redo.add_undo_property(node, "max_contacts_reported", old_val)
 			applied["max_contacts_reported"] = new_val

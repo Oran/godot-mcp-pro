@@ -9,6 +9,7 @@ enum State { IDLE, CAPTURING_FRAMES, MONITORING, RECORDING, MOVING_TO, WATCHING_
 
 var _state := State.IDLE
 var _pending_command: bool = false  # Crash recovery flag
+var _request_id: String = ""  # Echoed back so the editor can correlate replies
 
 # Frame capture state
 var _capture_frames_remaining: int = 0
@@ -53,6 +54,12 @@ var _moveto_keys_held: Array = []  # Track injected keys for guaranteed release
 
 
 func _ready() -> void:
+	# Editor-driven service only — disable it in exported builds rather than
+	# stat'ing user:// every frame in players' games.
+	if not OS.has_feature("editor") or OS.has_environment("GODOT_MCP_HEADLESS_CHILD"):
+		process_mode = Node.PROCESS_MODE_DISABLED
+		set_process(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
@@ -105,8 +112,13 @@ func _handle_request() -> void:
 	_state = State.IDLE
 	_pending_command = true
 
+	# Echoed back with the response so the editor can tell its own reply from
+	# a late one belonging to a command that already timed out.
+	_request_id = str(parsed.get("request_id", ""))
+
 	var command: String = parsed.get("command", "")
-	var params: Dictionary = parsed.get("params", {})
+	var raw_params: Variant = parsed.get("params", {})
+	var params: Dictionary = raw_params if raw_params is Dictionary else {}
 
 	match command:
 		"get_scene_tree":
@@ -149,6 +161,8 @@ func _handle_request() -> void:
 			_cmd_watch_signals(params)
 		"assert_node_state":
 			_cmd_assert_node_state(params)
+		"get_performance_monitors":
+			_cmd_get_performance_monitors(params)
 		_:
 			_write_response({"error": "Unknown command: %s" % command})
 
@@ -1609,6 +1623,9 @@ func _reconstruct_event(data: Dictionary) -> InputEvent:
 
 func _write_response(data: Dictionary) -> void:
 	_pending_command = false
+	if not _request_id.is_empty():
+		data = data.duplicate()
+		data["request_id"] = _request_id
 	var json := JSON.stringify(data)
 	var file := FileAccess.open(RESPONSE_PATH, FileAccess.WRITE)
 	if file:
@@ -1675,6 +1692,43 @@ func _cmd_assert_node_state(params: Dictionary) -> void:
 			"passed": passed,
 		}
 	})
+
+
+# ── get_performance_monitors ──────────────────────────────────────────────────
+
+func _cmd_get_performance_monitors(_params: Dictionary) -> void:
+	var monitors := {}
+	monitors["fps"] = Performance.get_monitor(Performance.TIME_FPS)
+	monitors["frame_time_msec"] = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	monitors["physics_frame_time_msec"] = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	monitors["navigation_process_msec"] = Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0
+
+	monitors["memory_static"] = Performance.get_monitor(Performance.MEMORY_STATIC)
+	monitors["memory_static_max"] = Performance.get_monitor(Performance.MEMORY_STATIC_MAX)
+
+	monitors["object_count"] = Performance.get_monitor(Performance.OBJECT_COUNT)
+	monitors["object_resource_count"] = Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)
+	monitors["object_node_count"] = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+	monitors["object_orphan_node_count"] = Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)
+
+	monitors["render_total_objects_in_frame"] = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
+	monitors["render_total_primitives_in_frame"] = Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)
+	monitors["render_total_draw_calls_in_frame"] = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	monitors["render_video_mem_used"] = Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)
+
+	monitors["physics_2d_active_objects"] = Performance.get_monitor(Performance.PHYSICS_2D_ACTIVE_OBJECTS)
+	monitors["physics_2d_collision_pairs"] = Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)
+	monitors["physics_2d_island_count"] = Performance.get_monitor(Performance.PHYSICS_2D_ISLAND_COUNT)
+
+	monitors["physics_3d_active_objects"] = Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS)
+	monitors["physics_3d_collision_pairs"] = Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)
+	monitors["physics_3d_island_count"] = Performance.get_monitor(Performance.PHYSICS_3D_ISLAND_COUNT)
+
+	monitors["navigation_active_maps"] = Performance.get_monitor(Performance.NAVIGATION_ACTIVE_MAPS)
+	monitors["navigation_region_count"] = Performance.get_monitor(Performance.NAVIGATION_REGION_COUNT)
+	monitors["navigation_agent_count"] = Performance.get_monitor(Performance.NAVIGATION_AGENT_COUNT)
+
+	_write_response({"result": {"monitors": monitors, "process": "game"}})
 
 
 func _serialize_value(value: Variant) -> Variant:

@@ -4,6 +4,78 @@ All notable changes to Godot MCP Pro will be documented in this file.
 
 ---
 
+## v1.16.0 — 2026-08-01
+
+**Minor** — a follow-up audit from the same reporter as v1.15.1, then a sweep of every file the audit touched and several it did not. 44 commits. Adds a headless execution path, an optional connection token, and a `SECURITY.md`.
+
+Thanks again to the reporter of the external audit, and to @Hkattelu for issue #37.
+
+### Added
+- **`run_headless_scene` / `run_headless_script` / `get_godot_executable`** — run a scene or an `extends SceneTree` script in a separate headless Godot process and get back stdout/stderr, the exit code and the duration. This is how to run a project's own CLI test suite, which the editor-driven tools could never see. Output goes through a generated runner script (a pipe deadlocks a verbose child), the deadline is measured against the clock, and a timeout kills the whole process tree and reports whether the kill was confirmed.
+- **Optional connection token**, default off. Enable via the new `godot_mcp_pro/require_connection_token` project setting or `GODOT_MCP_REQUIRE_TOKEN=1`; servers present it via `GODOT_MCP_TOKEN` or `GODOT_MCP_TOKEN_FILE`. Inert unless enabled — existing client configurations are unaffected.
+- **`SECURITY.md`** — states the trust model plainly, including the dial-out topology users cannot reasonably infer, and the limits of the `execute_editor_script` guard.
+- `search_in_files` gained `include_addons`, matching its four sibling analysis tools.
+- `edit_script` now reports `valid_after_edit`, `parse_errors` and `indentation_warning`.
+
+### Fixed — Critical
+- **`set_project_setting` silently changed value types.** Any numeric-looking string became an int or float with no way to force a String, and container types could not be written at all — an array smuggled through as a string was stored as a quoted String while the tool reported success. This corrupted `editor_plugins/enabled` on a user's project, which would have disabled every plugin including this one. Existing keys now keep their declared type, a `type` parameter covers new keys, arrays build container types, and anything that cannot be represented is rejected instead of degraded. `editor_plugins/enabled` is refused outright.
+- **A malformed request hung the caller instead of erroring.** GDScript raises on `42 == "ping"` rather than returning false, and the method was compared before its type was checked — so a request with a numeric method aborted dispatch with no response at all. Non-object `params`, a handler returning a non-Dictionary, and roughly 160 unchecked `int()`/`float()`/`bool()` conversions across all 27 command files had the same effect. All now answer with a specific error.
+- **`delete_scene` deleted any file.** It checked only that the path existed, so a mistyped path permanently removed a script, an image or `project.godot`. It now requires `.tscn`/`.scn` and refuses a scene open in the editor. `create_shader`, `create_theme` and `create_resource` had the same hole and now refuse a destination whose extension does not match.
+- **The POSIX process-tree kill never worked**, and reported success while doing nothing. `OS.execute` destroys `$1`, `$c` and `$#` in a script passed inline, so `pgrep -P ""` killed nothing. Verified fixed on Linux.
+
+### Fixed — High
+- **`validate_script` failed on every `class_name` script**, and then, after the first fix, on every script with live instances (`@tool`, autoloads, plugin code). It uses `CACHE_MODE_IGNORE` + `reload(keep_state=true)`, returns the real parser message, and reports `valid: null` with `indeterminate: true` when Godot skips the compile rather than guessing.
+- **Port exhaustion killed the whole session.** `connect()` ran once at startup; if 6505–6509 were all held, every later call reported that the editor was not connected. `sendCommand` re-binds lazily and the error now distinguishes "could not bind a port" from "no editor attached". `disconnect()` is also final — a bind still in flight can no longer resurrect the server.
+- **The injected autoloads ran in exported games**, stat'ing `user://` every frame. They guard on `OS.has_feature("editor")` now, and stand down inside a headless child so they cannot race the editor's own session.
+- **Stale autoloads were never reclaimed.** A crashed editor left its three entries in `project.godot` forever, producing the "Can't autoload" spam reported in v1.15.1. They are reclaimed and cleaned up, while an autoload pointing at someone else's script is left alone with a warning.
+- **`godot-cli project set-setting` had never worked** — it sent `setting` where the addon reads `key` — and its `autoType()` reintroduced the v1.15.1 type-punning through a second door. Six more CLI commands sent parameter names the addon does not read, including `input key`, which could never have worked.
+
+### Fixed — Medium
+- `execute_editor_script` returned its output twice; the sentinel is now an object identity that no caller value can collide with, and an explicit `return null` stays distinguishable from no return.
+- `get_performance_monitors` reported throttled FPS without saying so. It reports `fps_throttled` explicitly — `false` in a separate window, focus-derived when embedded, and `null` in a floating Game workspace whose focus cannot be read.
+- Colors did not round-trip: reading one and writing it straight back set the property to white. All five structured types round-trip now, and JSON text is accepted for clients that stringify structured arguments.
+- `duplicate_node` on the scene root produced a node attached outside the scene and lost on save.
+- The game IPC channel had no correlation or mutual exclusion; two runtime commands at once could consume each other's replies.
+- Open-resource guards compared paths case-sensitively, so on Windows and macOS a differently cased path slipped past them.
+- The status panel stacked duplicate signal connections on every reload.
+- Windows runner quoting: an argument ending in a backslash swallowed its closing quote and merged with the next; delayed expansion was not disabled.
+
+### Notes
+- Tool count is now **178** (Full mode). Minimal, Lite and 3D modes are unchanged.
+- POSIX behaviour was verified on Linux (WSL Ubuntu, Godot 4.6.2) this cycle. macOS remains untested; the code paths are shared with Linux.
+- Known limitation: a grandchild whose own parent has already exited is reparented to init before a timeout kill runs, so no parent-walking approach can reach it.
+
+---
+
+## v1.15.1 — 2026-07-19
+
+**Patch** — 15 fixes from an external user's full-toolset audit (all 174 tools tested against a live editor). Huge thanks to the reporter.
+
+### Fixed — Critical
+- **`set_particle_color_gradient` infinite loop / editor hang**: clearing a fresh `Gradient` point-by-point never terminates because `Gradient.remove_point` refuses to drop below 2 points. Gradients are now built by assigning `offsets` / `colors` wholesale. The same root cause also produced a spurious opaque-black stop at offset 0 in every `apply_particle_preset` color ramp — both fixed via the same change.
+- **`connect_signal` connections were never saved to the `.tscn`**: `Object.connect()` was called without `CONNECT_PERSIST`, so `PackedScene.pack()` dropped the connection on save. Connections are now persistent; new optional `deferred` / `one_shot` parameters, and the response echoes `flags` / `persistent`.
+- **`update_property` destroyed Resource-typed properties**: assigning e.g. `texture` by `"res://..."` path passed the raw String through, which the engine coerced to `null` — silently wiping the existing value. `PropertyParser` now loads `res://` / `uid://` paths into Resources (also fixes `batch_add_nodes` properties), and `update_property` fails loudly when a string cannot be resolved instead of committing a `null`.
+
+### Fixed — High
+- **`create_theme` returned `{}` and never wrote the file**: a `!= null` check on a `Dictionary` guard made the guard branch unconditional. Now uses `is_empty()` like every other call site. Also creates parent directories.
+- **`get_performance_monitors` reported the editor process's metrics as the game's**: `Performance` is per-process. The tool now routes through the game IPC channel (requires a playing scene) and returns `"process": "game"`; use `get_editor_performance` for editor metrics.
+- **`get_test_report` counted passing assertions as failures**: non-assertion steps (input/wait/screenshot) were scored as failed, and game replies were stored still double-wrapped so their `passed` key was never found. Only assertion results are stored now, and the envelope is unwrapped defensively. Empty reports return `no_results: true` instead of a misleading `all_passed: false`.
+- **`run_test_scenario` reported `all_passed: false` on green runs**: same double-wrapped envelope, unwrapped one level too few in `_execute_assert_step`. Assertion results now surface `passed` at the top level with a consistent shape.
+
+### Fixed — Medium
+- **`get_scene_tree` returned editor-internal absolute paths** (`/root/@EditorNode@.../...`): paths are now scene-relative (root = `"."`), directly usable as `node_path` input for other tools, and ~10× smaller.
+- **`analyze_signal_flow` dumped editor-internal connections** (~8k tokens of dock bookkeeping): now filters to persistent connections targeting nodes inside the edited scene.
+- **`find_unused_resources` ignored `uid://` references**: `preload("uid://…")` and `uid=` references are now resolved back to their `res://` paths (self-referencing file-header uids excluded). References held via `ProjectSettings` defaults (main scene, audio bus layout, icon, autoloads) are also seeded, so `default_bus_layout.tres` and friends are no longer reported deletable.
+- **`get_input_actions(include_builtin: false)` leaked 16 editor actions** (`spatial_editor/*`): actions not declared in the project's `ProjectSettings` are now excluded.
+- **`create_resource` failed on missing parent directories**: directories are created recursively; the error message now includes the path.
+- **`run_test_scenario` `keycode` input steps never released the key**, corrupting later assertions: keycode steps now auto-release like `action` steps (disable with `auto_release: false`).
+
+### Fixed — Minor
+- **`set_particle_material`**: emission sub-parameters (`emission_sphere_radius`, box extents, ring radii/height) are now listed in `changes[]`.
+- `run_test_scenario` screen-text assertions no longer lose their result type to a key collision (`assert_type` field).
+
+---
+
 ## v1.14.1 — 2026-05-24
 
 **Patch** — `assert_node_state` regression fix

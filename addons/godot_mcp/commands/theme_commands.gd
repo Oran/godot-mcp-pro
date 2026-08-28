@@ -27,9 +27,17 @@ func _create_theme(params: Dictionary) -> Dictionary:
 	if font_size > 0:
 		theme.default_font_size = font_size
 
+	var ext_guard := guard_expected_extension(path, ["tres", "res", "theme"], "a theme resource")
+	if not ext_guard.is_empty():
+		return ext_guard
+
 	var scene_guard := guard_offline_scene_save(path)
-	if scene_guard != null:
+	if not scene_guard.is_empty():
 		return scene_guard
+
+	var dir_guard := ensure_parent_dir(path)
+	if not dir_guard.is_empty():
+		return dir_guard
 
 	var err := ResourceSaver.save(theme, path)
 	if err != OK:
@@ -93,7 +101,7 @@ func _set_theme_constant(params: Dictionary) -> Dictionary:
 		return error_not_found("Control node at '%s'" % node_path)
 
 	var control: Control = node
-	var value: int = int(params.get("value", 0))
+	var value: int = optional_int(params, "value", 0)
 
 	var had_old := control.has_theme_constant_override(const_name)
 	var old_value: Variant = control.get("theme_override_constants/" + const_name) if had_old else null
@@ -122,7 +130,7 @@ func _set_theme_font_size(params: Dictionary) -> Dictionary:
 		return error_not_found("Control node at '%s'" % node_path)
 
 	var control: Control = node
-	var size: int = int(params.get("size", 16))
+	var size: int = optional_int(params, "size", 16)
 
 	var had_old := control.has_theme_font_size_override(font_name)
 	var old_value: Variant = control.get("theme_override_font_sizes/" + font_name) if had_old else null
@@ -291,7 +299,7 @@ func _setup_control(params: Dictionary) -> Dictionary:
 
 	# Separation (for VBox/HBoxContainer)
 	if params.has("separation"):
-		var sep: int = int(params["separation"])
+		var sep: int = optional_int(params, "separation")
 		if target is BoxContainer:
 			target.add_theme_constant_override("separation", sep)
 			applied.append("separation=%d" % sep)

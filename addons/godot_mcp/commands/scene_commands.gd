@@ -26,7 +26,7 @@ func _get_scene_tree(params: Dictionary) -> Dictionary:
 		return error_no_scene()
 
 	var max_depth: int = optional_int(params, "max_depth", -1)
-	var tree := NodeUtils.get_node_tree(root, max_depth)
+	var tree := NodeUtils.get_node_tree(root, root, max_depth)
 	return success({"scene_path": root.scene_file_path, "tree": tree})
 
 
@@ -64,9 +64,25 @@ func _create_scene(params: Dictionary) -> Dictionary:
 	# Validate root type exists
 	if not ClassDB.class_exists(root_type):
 		return error_invalid_params("Unknown node type: %s" % root_type)
+	# class_exists() is true for Resources and abstract classes too. Assigning
+	# either into a typed Node local raises — which aborts the handler and
+	# leaves the caller with no response at all.
+	if not ClassDB.is_parent_class(root_type, "Node"):
+		return error_invalid_params("'%s' is not a Node type, so it cannot be a scene root" % root_type)
+	if not ClassDB.can_instantiate(root_type):
+		return error_invalid_params("'%s' is abstract and cannot be instantiated" % root_type)
+
+	var force: bool = optional_bool(params, "force", false)
+	if not force and FileAccess.file_exists(path):
+		return error_conflict(
+			"Scene '%s' already exists" % path,
+			{"path": path, "suggestion": "Pass force=true to overwrite it, or choose another path."}
+		)
 
 	# Create the scene
 	var root: Node = ClassDB.instantiate(root_type)
+	if root == null:
+		return error_internal("Could not instantiate '%s'" % root_type)
 	if root_name.is_empty():
 		root_name = path.get_file().get_basename()
 	root.name = root_name
@@ -115,6 +131,20 @@ func _delete_scene(params: Dictionary) -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return error_not_found("Scene file '%s'" % path)
 
+	# The tool is delete_scene, but nothing checked that the target was one —
+	# a mistyped path would permanently delete a script, an image, or
+	# project.godot, with no undo.
+	if not is_scene_resource_path(path):
+		return error_invalid_params(
+			"'%s' is not a scene file (.tscn or .scn). delete_scene will not delete other files." % path
+		)
+
+	if is_scene_path_open(path):
+		return error_conflict(
+			"Refusing to delete '%s' while it is open in the editor" % normalize_project_path(path),
+			{"suggestion": "Close the scene tab first."}
+		)
+
 	var err := DirAccess.remove_absolute(path)
 	if err != OK:
 		return error_internal("Failed to delete scene: %s" % error_string(err))
@@ -148,9 +178,16 @@ func _add_scene_instance(params: Dictionary) -> Dictionary:
 	if parent == null:
 		return error_not_found("Parent node '%s'" % parent_path, "Use get_scene_tree to see available nodes")
 
-	var packed: PackedScene = load(scene_path)
-	if packed == null:
+	# load() happily returns whatever the file actually is; assigning a Script
+	# or a Texture into a typed PackedScene local raises rather than erroring.
+	var loaded: Variant = load(scene_path)
+	if loaded == null:
 		return error_internal("Failed to load scene: %s" % scene_path)
+	if not loaded is PackedScene:
+		return error_invalid_params(
+			"'%s' is a %s, not a PackedScene" % [scene_path, loaded.get_class() if loaded is Object else type_string(typeof(loaded))]
+		)
+	var packed: PackedScene = loaded
 
 	var instance := packed.instantiate()
 	if not instance_name.is_empty():
@@ -234,10 +271,12 @@ func _save_scene(params: Dictionary) -> Dictionary:
 
 	var err: int
 	var save_method: String
-	if root.scene_file_path.is_empty() or normalize_project_path(root.scene_file_path) != normalized_path:
+	if root.scene_file_path.is_empty() or not paths_match(normalize_project_path(root.scene_file_path), normalized_path):
 		EditorInterface.save_scene_as(normalized_path)
-		err = OK
+		# save_scene_as() returns nothing, so success was simply assumed and
+		# reported. Check that the file actually appeared instead.
 		save_method = "EditorInterface.save_scene_as"
+		err = OK if FileAccess.file_exists(normalized_path) else ERR_FILE_CANT_WRITE
 	else:
 		err = EditorInterface.save_scene()
 		save_method = "EditorInterface.save_scene"

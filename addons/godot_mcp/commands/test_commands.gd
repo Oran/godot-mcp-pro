@@ -97,6 +97,9 @@ func _run_test_scenario(params: Dictionary) -> Dictionary:
 					pass_count += 1
 				else:
 					fail_count += 1
+				# Only assertion steps carry a verdict — store just these for
+				# get_test_report (input/wait/screenshot steps have no "passed").
+				_test_results.append(step_result)
 
 			"screenshot":
 				var screenshot_result := await _send_game_command("capture_frames", {
@@ -133,9 +136,6 @@ func _run_test_scenario(params: Dictionary) -> Dictionary:
 		"results": results,
 	}
 
-	# Store results for get_test_report
-	_test_results.append_array(results)
-
 	return success(summary)
 
 
@@ -167,11 +167,15 @@ func _assert_node_state(params: Dictionary) -> Dictionary:
 		"operator": operator,
 	}, 5.0)
 
-	# Store for test report
-	if result.has("result"):
-		_test_results.append(result["result"])
+	if result.has("error"):
+		return result
 
-	return result
+	# The game reply is wrapped twice ({"result": {"result": {...}}}) — unwrap
+	# defensively before storing/returning so "passed" sits at the top level.
+	var payload := unwrap_game_result(result)
+	if payload.has("passed"):
+		_test_results.append(payload)
+	return success(payload)
 
 
 func _assert_screen_text(params: Dictionary) -> Dictionary:
@@ -248,7 +252,7 @@ func _run_stress_test(params: Dictionary) -> Dictionary:
 	## Run rapid random inputs for N seconds and check for crashes.
 	## Returns frame count, timing, and any errors from game output.
 
-	var duration: float = float(params.get("duration", 5.0))
+	var duration: float = optional_float(params, "duration", 5.0)
 	if duration <= 0 or duration > 60:
 		return error_invalid_params("Duration must be between 0 and 60 seconds")
 
@@ -341,19 +345,25 @@ func _get_test_report(params: Dictionary) -> Dictionary:
 	var details: Array[Dictionary] = []
 
 	for result: Dictionary in _test_results:
-		var passed: bool = result.get("passed", false)
-		if passed:
+		# Unwrap defensively and skip entries that carry no verdict
+		# (input/wait/screenshot steps are not assertions).
+		var entry := unwrap_game_result(result)
+		if not entry.has("passed"):
+			continue
+		if entry.get("passed", false):
 			pass_count += 1
 		else:
 			fail_count += 1
-		details.append(result)
+		details.append(entry)
 
+	var total := pass_count + fail_count
 	var report := {
-		"total": _test_results.size(),
+		"total": total,
 		"passed": pass_count,
 		"failed": fail_count,
-		"pass_rate": ("%.1f%%" % (100.0 * pass_count / _test_results.size())) if not _test_results.is_empty() else "N/A",
-		"all_passed": fail_count == 0 and not _test_results.is_empty(),
+		"pass_rate": ("%.1f%%" % (100.0 * pass_count / total)) if total > 0 else "N/A",
+		"all_passed": fail_count == 0 and total > 0,
+		"no_results": total == 0,
 		"details": details,
 	}
 
@@ -395,6 +405,17 @@ func _execute_input_step(step: Dictionary) -> Dictionary:
 			"ctrl": step.get("ctrl", false),
 			"alt": step.get("alt", false),
 		})
+		# Auto-release if pressed, mirroring the action branch — otherwise the
+		# key stays held for the rest of the session and corrupts later steps
+		if pressed and step.get("auto_release", true):
+			events.append({
+				"type": "key",
+				"keycode": str(step["keycode"]),
+				"pressed": false,
+				"shift": step.get("shift", false),
+				"ctrl": step.get("ctrl", false),
+				"alt": step.get("alt", false),
+			})
 	else:
 		return {"error": "Input step requires 'action' or 'keycode'"}
 
@@ -443,14 +464,16 @@ func _execute_assert_step(step: Dictionary) -> Dictionary:
 
 		var expected_text: String = str(step["text"])
 		var partial: bool = step.get("partial", true) as bool
+		# "assert_type" (not "type") so the caller's step_result.merge() cannot
+		# collide with the step's own "type": "assert" key
 		for element: Dictionary in elements:
 			var element_text: String = str(element.get("text", ""))
 			if partial and element_text.contains(expected_text):
-				return {"passed": true, "type": "screen_text", "expected": expected_text, "found_in": element_text}
+				return {"passed": true, "assert_type": "screen_text", "expected": expected_text, "found_in": element_text}
 			elif not partial and element_text == expected_text:
-				return {"passed": true, "type": "screen_text", "expected": expected_text, "found_in": element_text}
+				return {"passed": true, "assert_type": "screen_text", "expected": expected_text, "found_in": element_text}
 
-		return {"passed": false, "type": "screen_text", "expected": expected_text, "error": "Text not found on screen"}
+		return {"passed": false, "assert_type": "screen_text", "expected": expected_text, "error": "Text not found on screen"}
 
 	elif step.has("node_path") and step.has("property"):
 		# Node state assertion
@@ -460,10 +483,12 @@ func _execute_assert_step(step: Dictionary) -> Dictionary:
 			"expected": step.get("expected", null),
 			"operator": str(step.get("operator", "eq")),
 		}, 5.0)
-		if result.has("result"):
-			return result["result"]
-		elif result.has("error"):
+		if result.has("error"):
 			return {"passed": false, "error": str(result["error"])}
+		# Game replies are double-wrapped — unwrap until "passed" surfaces
+		var payload := unwrap_game_result(result)
+		if payload.has("passed"):
+			return payload
 		return {"passed": false, "error": "Unknown assertion error"}
 
 	else:
@@ -509,7 +534,7 @@ func _send_game_command(command: String, params: Dictionary = {}, timeout_sec: f
 	if not FileAccess.file_exists(response_path):
 		# Try to auto-resume the debugger
 		if ei.is_playing_scene():
-			_try_debugger_continue()
+			try_debugger_continue()
 			for _retry in 20:
 				await get_tree().create_timer(0.1).timeout
 				if FileAccess.file_exists(response_path):
@@ -518,9 +543,7 @@ func _send_game_command(command: String, params: Dictionary = {}, timeout_sec: f
 	if not FileAccess.file_exists(response_path):
 		if FileAccess.file_exists(request_path):
 			DirAccess.remove_absolute(request_path)
-		return error(-32000, "Game command timed out after %.1fs" % timeout_sec, {
-			"suggestion": "Ensure the game is running and MCPGameInspector autoload is active",
-		})
+		return build_timeout_error(timeout_sec)
 
 	# Read response
 	var file := FileAccess.open(response_path, FileAccess.READ)
@@ -538,29 +561,6 @@ func _send_game_command(command: String, params: Dictionary = {}, timeout_sec: f
 		return error(-32000, str(parsed["error"]))
 
 	return success(parsed)
-
-
-## Press the debugger "Continue" button to resume a paused game process.
-func _try_debugger_continue() -> void:
-	var base := EditorInterface.get_base_control()
-	if base == null:
-		return
-	var queue: Array[Node] = [base]
-	while not queue.is_empty():
-		var node := queue.pop_front()
-		if node.get_class() == "ScriptEditorDebugger":
-			var inner: Array[Node] = [node]
-			while not inner.is_empty():
-				var n := inner.pop_front()
-				if n is Button and n.tooltip_text == "Continue":
-					n.emit_signal("pressed")
-					push_warning("[MCP] Auto-resumed debugger after runtime error")
-					return
-				for c in n.get_children():
-					inner.append(c)
-			return
-		for child in node.get_children():
-			queue.append(child)
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

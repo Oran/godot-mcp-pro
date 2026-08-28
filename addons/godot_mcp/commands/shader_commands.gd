@@ -38,6 +38,10 @@ func _create_shader(params: Dictionary) -> Dictionary:
 			"sky":
 				content = "shader_type sky;\n\nvoid sky() {\n\tCOLOR = vec3(0.3, 0.5, 0.8);\n}\n"
 
+	var ext_guard := guard_expected_extension(path, ["gdshader", "gdshaderinc"], "a shader")
+	if not ext_guard.is_empty():
+		return ext_guard
+
 	# Ensure directory exists
 	var dir_path := path.get_base_dir()
 	if not DirAccess.dir_exists_absolute(dir_path):

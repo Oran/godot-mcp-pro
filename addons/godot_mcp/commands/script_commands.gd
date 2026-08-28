@@ -180,6 +180,7 @@ func _edit_script(params: Dictionary) -> Dictionary:
 
 	var content := file.get_as_text()
 	file.close()
+	var original_for_diff := content
 
 	var changes_made := 0
 
@@ -209,8 +210,8 @@ func _edit_script(params: Dictionary) -> Dictionary:
 	elif params.has("content") and (params.has("start_line") or params.has("end_line")):
 		if not params.has("start_line"):
 			return error_invalid_params("start_line is required when end_line is provided")
-		var start_line: int = int(params["start_line"])
-		var end_line: int = int(params.get("end_line", start_line))
+		var start_line: int = optional_int(params, "start_line")
+		var end_line: int = optional_int(params, "end_line", start_line)
 		var lines := content.split("\n")
 		if start_line < 1:
 			return error_invalid_params("start_line must be >= 1")
@@ -238,7 +239,7 @@ func _edit_script(params: Dictionary) -> Dictionary:
 
 	# Support insert at line
 	elif params.has("insert_at_line") and params.has("text"):
-		var line_num: int = int(params["insert_at_line"])
+		var line_num: int = optional_int(params, "insert_at_line")
 		var text: String = str(params["text"])
 		var lines := content.split("\n")
 		line_num = clampi(line_num, 0, lines.size())
@@ -248,6 +249,9 @@ func _edit_script(params: Dictionary) -> Dictionary:
 
 	if changes_made == 0:
 		return success({"path": path, "changes_made": 0, "message": "No changes applied"})
+
+	var original_content := original_for_diff
+	var indent_warning := _indentation_mismatch_warning(original_content, content)
 
 	# Write back
 	file = FileAccess.open(path, FileAccess.WRITE)
@@ -260,7 +264,64 @@ func _edit_script(params: Dictionary) -> Dictionary:
 	# Reload the script resource so the editor picks up changes immediately
 	_reload_script(path)
 
-	return success({"path": path, "changes_made": changes_made})
+	var payload := {"path": path, "changes_made": changes_made}
+	if not indent_warning.is_empty():
+		payload["indentation_warning"] = indent_warning
+
+	# Report immediately if the edit left the file unparseable. Writing blindly
+	# is how a bad edit stays invisible until something else fails much later.
+	var check := await _validate_script({"path": path})
+	var check_result: Dictionary = check.get("result", {})
+	if check_result.get("valid") == false:
+		payload["valid_after_edit"] = false
+		payload["message"] = "The edit was written, but the file no longer parses. Review it or edit again."
+		if check_result.has("parse_errors"):
+			payload["parse_errors"] = check_result["parse_errors"]
+	elif check_result.get("valid") == true:
+		payload["valid_after_edit"] = true
+
+	return success(payload)
+
+
+## Flags an edit whose indentation style differs from the file's own.
+##
+## edit_script writes content verbatim — it never reindents — so when a caller
+## supplies a snippet indented differently from the surrounding file, the file
+## silently ends up mixed or wrongly nested. Reported as a warning rather than
+## a refusal, since a deliberate reindent is legitimate.
+func _indentation_mismatch_warning(before: String, after: String) -> String:
+	var before_style := _detect_indent_style(before)
+	var after_style := _detect_indent_style(after)
+	if before_style.is_empty() or after_style.is_empty() or before_style == after_style:
+		return ""
+	return "This file was indented with %s but the new content uses %s. edit_script writes content verbatim and never reindents, so mixed indentation here is what the caller supplied." % [
+		before_style, after_style
+	]
+
+
+## Returns "tabs", "N spaces", or "" when there is nothing to go on.
+func _detect_indent_style(text: String) -> String:
+	var tab_lines := 0
+	var smallest_space_indent := 0
+	var space_lines := 0
+	for line in text.split("\n"):
+		if line.is_empty() or line.strip_edges().is_empty():
+			continue
+		if line.begins_with("\t"):
+			tab_lines += 1
+			continue
+		var spaces := 0
+		while spaces < line.length() and line[spaces] == " ":
+			spaces += 1
+		if spaces > 0:
+			space_lines += 1
+			if smallest_space_indent == 0 or spaces < smallest_space_indent:
+				smallest_space_indent = spaces
+	if tab_lines == 0 and space_lines == 0:
+		return ""
+	if tab_lines >= space_lines:
+		return "tabs"
+	return "%d spaces" % smallest_space_indent
 
 
 ## Force-reload a script so the editor reflects disk changes immediately.
@@ -332,27 +393,125 @@ func _validate_script(params: Dictionary) -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return error_not_found("Script '%s'" % path)
 
-	var file := FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return error_internal("Cannot read script: %s" % error_string(FileAccess.get_open_error()))
+	# Load the real path with the cache bypassed. Compiling an anonymous
+	# GDScript.new() copy instead would give it no resource_path, so any
+	# class_name it declares collides with the already-registered global class
+	# and every class_name script reports a bogus "Parse error".
+	# CACHE_MODE_IGNORE keeps the live cached script untouched.
+	# Note where the Output panel ends before anything in this validation runs,
+	# so stale failures of the same file are not re-reported as current. The
+	# load below already emits the parser message, so the mark has to precede
+	# it, not just the reload.
+	var log_mark := _output_line_count()
 
-	var source_code := file.get_as_text()
-	file.close()
+	var script: GDScript = ResourceLoader.load(path, "GDScript", ResourceLoader.CACHE_MODE_IGNORE)
+	if script == null:
+		return success({
+			"path": path,
+			"valid": false,
+			"message": "Could not load script as GDScript",
+		})
 
-	var script := GDScript.new()
-	script.source_code = source_code
-	var err := script.reload()
+	# load() alone is not a validity check — it returns a non-null GDScript even
+	# for a file that does not compile. reload() is what actually parses.
+	#
+	# keep_state=true matters: without it, reload() returns ERR_ALREADY_IN_USE
+	# *before compiling* for any script that has live instances in the editor —
+	# @tool scripts, autoloads, plugin code — and a perfectly valid script would
+	# be reported invalid. It still returns a parse error for broken source.
+	var err := script.reload(true)
 
 	if err == OK:
 		return success({"path": path, "valid": true, "message": "Script compiles successfully"})
 
-	return success({
+	if err == ERR_ALREADY_IN_USE:
+		# Godot skipped the reload, so nothing was compiled. That is not
+		# evidence of a parse error — but it is not evidence of validity
+		# either, so claim neither.
+		return success({
+			"path": path,
+			"valid": null,
+			"indeterminate": true,
+			"error_code": err,
+			"error_string": error_string(err),
+			"message": "Godot skipped the reload because the script is in use by live instances, so no compilation verdict was produced. Nothing here says the script is broken, and nothing says it is valid. Re-check after closing scenes that instance it, or inspect get_editor_errors.",
+		})
+
+	# The Output panel is appended to on a deferred call, so the parser message
+	# is not there yet on the frame the reload failed.
+	await get_tree().process_frame
+
+	var parse_errors := _collect_parse_errors(path, log_mark)
+	var result_payload := {
 		"path": path,
 		"valid": false,
 		"error_code": err,
 		"error_string": error_string(err),
 		"message": "Compilation failed. Use get_output_log or get_editor_errors for details.",
-	})
+	}
+	if not parse_errors.is_empty():
+		result_payload["parse_errors"] = parse_errors
+	return success(result_payload)
+
+
+## Scrapes the editor Output panel for parser messages naming this script, so a
+## failed validation says *what* is wrong instead of only "Parse error".
+## `since_line` is where the Output panel ended before the reload, so stale
+## failures of the same file are not re-reported as if they were current.
+func _collect_parse_errors(path: String, since_line: int) -> Array:
+	var found: Array = []
+	var rtl := _output_label()
+	if rtl == null:
+		return found
+
+	var lines: PackedStringArray = rtl.get_parsed_text().split("\n")
+	# The panel can be cleared between the mark and now, which would leave the
+	# mark past the end; fall back to scanning the tail in that case.
+	var start: int = since_line if since_line <= lines.size() else maxi(0, lines.size() - 40)
+	for i in range(start, lines.size()):
+		var line: String = lines[i].strip_edges()
+		if line.is_empty():
+			continue
+		# Match the full res:// path, not the basename — a project can hold
+		# several player.gd. CACHE_MODE_IGNORE preserves resource_path, so
+		# genuine messages for this script always carry it in full.
+		if line.contains(path) and not found.has(line):
+			found.append(line)
+	return found
+
+
+func _output_label() -> RichTextLabel:
+	var base: Control = get_editor().get_base_control()
+	if base == null:
+		return null
+	var editor_log: Node = base.find_child("Output", true, false)
+	if editor_log == null:
+		return null
+	return _find_rtl_node(editor_log)
+
+
+## Index where the next appended line will land. Output entries end with a
+## newline, so split() leaves a trailing empty element — counting elements
+## would point one past the new line and skip it.
+func _output_line_count() -> int:
+	var rtl := _output_label()
+	if rtl == null:
+		return 0
+	var text := rtl.get_parsed_text()
+	var count := text.split("\n").size()
+	if text.ends_with("\n"):
+		count -= 1
+	return maxi(0, count)
+
+
+func _find_rtl_node(node: Node) -> RichTextLabel:
+	if node is RichTextLabel:
+		return node
+	for child in node.get_children():
+		var found := _find_rtl_node(child)
+		if found:
+			return found
+	return null
 
 
 func _get_open_scripts(_params: Dictionary) -> Dictionary:

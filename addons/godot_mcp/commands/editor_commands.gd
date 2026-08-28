@@ -360,11 +360,17 @@ func _execute_editor_script(params: Dictionary) -> Dictionary:
 	if not unsafe_guard.is_empty():
 		return unsafe_guard
 
-	# Wrap user code in a @tool script
+	# Wrap user code in a @tool script.
+	# The wrapper returns a sentinel rather than _mcp_output, so a caller that
+	# never returns anything of its own does not get the printed output echoed
+	# back a second time as an escaped string in return_value.
 	var wrapped_code := """@tool
 extends Node
 
 var _mcp_output: Array = []
+# Read back through `self` below, so a same-named local in the caller's code
+# cannot shadow it.
+var _mcp_sentinel := RefCounted.new()
 
 func _mcp_print(value: Variant) -> void:
 	_mcp_output.append(str(value))
@@ -373,7 +379,7 @@ func run() -> Variant:
 	# User code begins
 %s
 	# User code ends
-	return _mcp_output
+	return self._mcp_sentinel
 """ % _indent_code(code)
 
 	# Create a temporary script
@@ -403,13 +409,20 @@ func run() -> Variant:
 	if raw_output is Array:
 		mcp_output = raw_output
 
+	# Read the sentinel before freeing the node that owns it.
+	var sentinel: Variant = temp_node.get("_mcp_sentinel")
+
 	# Cleanup
 	temp_node.queue_free()
 
-	return success({
-		"output": mcp_output,
-		"return_value": str(output) if output != null else null,
-	})
+	# Suppress only the sentinel. An explicit `return null` from the caller's
+	# code is a real return value and stays distinguishable from no return.
+	# The sentinel is an object identity rather than a magic string, because
+	# any string a caller might return is a legitimate result.
+	var payload := {"output": mcp_output}
+	if not (output is RefCounted and output == sentinel):
+		payload["return_value"] = str(output) if output != null else null
+	return success(payload)
 
 
 func _guard_editor_script_file_io(code: String, allow_unsafe_editor_io: bool) -> Dictionary:
@@ -435,6 +448,7 @@ func _guard_editor_script_file_io(code: String, allow_unsafe_editor_io: bool) ->
 			"unsafe_patterns": unsafe_patterns,
 			"open_scenes": get_open_scene_paths(),
 			"suggestion": "Use dedicated MCP commands and save_scene for editor-owned resources, or pass allow_unsafe_editor_io=true only when no open editor resource can be overwritten.",
+			"note": "This is a text match on the submitted source, meant to catch accidents. It is not a security boundary: a dynamically built call, or a destructive API not on the list, is not caught.",
 		}
 	)
 
@@ -662,7 +676,7 @@ func _set_editor_camera(params: Dictionary) -> Dictionary:
 
 	# Set FOV
 	if params.has("fov"):
-		cam.fov = float(params["fov"])
+		cam.fov = optional_float(params, "fov")
 
 	var pos := cam.global_position
 	var rot := cam.rotation_degrees

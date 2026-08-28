@@ -18,10 +18,10 @@ func get_commands() -> Dictionary:
 
 ## ─── Helpers ───────────────────────────────────────────────────────────────
 
+## Kept as a thin alias so existing call sites are unchanged; the shared
+## helper is the one that does not raise on null, arrays or dictionaries.
 func _optional_float(params: Dictionary, key: String, default: float) -> float:
-	if params.has(key):
-		return float(params[key])
-	return default
+	return optional_float(params, key, default)
 
 
 func _parse_color_param(params: Dictionary, key: String, default: Color) -> Color:

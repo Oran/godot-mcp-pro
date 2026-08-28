@@ -16,9 +16,15 @@ func _get_input_actions(params: Dictionary) -> Dictionary:
 	var actions: Dictionary = {}
 	for action: StringName in InputMap.get_actions():
 		var action_str := str(action)
-		# Skip built-in UI actions unless requested
-		if not include_builtin and action_str.begins_with("ui_"):
-			continue
+		if not include_builtin:
+			# Skip built-in UI actions
+			if action_str.begins_with("ui_"):
+				continue
+			# Skip editor-registered actions (spatial_editor/*, etc.) — the addon
+			# runs in the editor process, so InputMap also carries the editor's
+			# own actions, which are not part of the project's InputMap
+			if not ProjectSettings.has_setting("input/" + action_str):
+				continue
 		# Apply filter
 		if not filter.is_empty() and not action_str.contains(filter):
 			continue
@@ -45,7 +51,7 @@ func _set_input_action(params: Dictionary) -> Dictionary:
 		return error_invalid_params("'events' array is required")
 	var event_defs: Array = params["events"]
 
-	var deadzone: float = float(params.get("deadzone", 0.5))
+	var deadzone: float = optional_float(params, "deadzone", 0.5)
 
 	# Build the events array
 	var events: Array[InputEvent] = []

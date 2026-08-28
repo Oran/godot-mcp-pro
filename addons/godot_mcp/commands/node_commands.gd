@@ -21,6 +21,9 @@ func get_commands() -> Dictionary:
 		"get_node_groups": _get_node_groups,
 		"set_node_groups": _set_node_groups,
 		"find_nodes_in_group": _find_nodes_in_group,
+		"get_editor_selection": _get_editor_selection,
+		"select_nodes": _select_nodes,
+		"clear_editor_selection": _clear_editor_selection,
 	}
 
 
@@ -57,6 +60,13 @@ func _add_node(params: Dictionary) -> Dictionary:
 	var custom_script: Script = null
 
 	if ClassDB.class_exists(type):
+		# class_exists() is also true for Resources and abstract classes.
+		# Assigning either into the typed `node` local raises, which aborts the
+		# handler so the caller gets no response at all.
+		if not ClassDB.is_parent_class(type, "Node"):
+			return error_invalid_params("'%s' is not a Node type" % type)
+		if not ClassDB.can_instantiate(type):
+			return error_invalid_params("'%s' is abstract and cannot be instantiated" % type)
 		node = ClassDB.instantiate(type)
 	else:
 		# Try to find a script with matching class_name
@@ -64,10 +74,14 @@ func _add_node(params: Dictionary) -> Dictionary:
 		if custom_script == null:
 			return error_invalid_params("Unknown node type: '%s'. Not found in ClassDB or as a script class_name. Use list_scripts to see available script classes." % type)
 		var base_type: String = custom_script.get_instance_base_type()
-		if not ClassDB.class_exists(base_type):
+		if not ClassDB.class_exists(base_type) or not ClassDB.is_parent_class(base_type, "Node"):
 			return error_invalid_params("Script '%s' extends '%s' which is not a valid node type" % [type, base_type])
+		if not ClassDB.can_instantiate(base_type):
+			return error_invalid_params("Script '%s' extends abstract class '%s'" % [type, base_type])
 		node = ClassDB.instantiate(base_type)
 		node.set_script(custom_script)
+	if node == null:
+		return error_internal("Could not instantiate '%s'" % type)
 	if not node_name.is_empty():
 		node.name = node_name
 
@@ -148,9 +162,22 @@ func _duplicate_node(params: Dictionary) -> Dictionary:
 	if new_name.is_empty():
 		new_name = str(node.name) + "_copy"
 
+	# The edited scene root does have a parent — an editor-internal node — so a
+	# copy attached there lands OUTSIDE the scene and is silently discarded on
+	# save. Verified: duplicating "." produced "../Main_copy", absent from
+	# get_scene_tree. Refuse instead of producing an orphan.
+	if node == root:
+		return error_invalid_params(
+			"Cannot duplicate the scene root '%s'. A copy would be attached outside the scene and lost on save; duplicate a child instead." % node.name
+		)
+	var parent := node.get_parent()
+	if parent == null:
+		return error_invalid_params(
+			"Node '%s' has no parent to attach the copy to." % node.name
+		)
+
 	var dup := node.duplicate()
 	dup.name = new_name
-	var parent := node.get_parent()
 
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Duplicate %s" % node.name)
@@ -271,6 +298,16 @@ func _update_property(params: Dictionary) -> Dictionary:
 				parsed_value = target_node
 				break
 
+	# Fail loudly instead of committing a String into an Object-typed property —
+	# the engine would coerce it to null and silently destroy the existing value.
+	if value is String and typeof(old_value) == TYPE_OBJECT and parsed_value == null:
+		return error_invalid_params(
+			"Could not resolve '%s' to a Resource for property '%s'" % [str(value), property])
+	if value is String and parsed_value is String and typeof(old_value) in [TYPE_NIL, TYPE_OBJECT] \
+			and (str(value).begins_with("res://") or str(value).begins_with("uid://")):
+		return error_not_found("Resource '%s'" % str(value),
+			"The path could not be loaded for property '%s'" % property)
+
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Set %s.%s" % [node.name, property])
 	undo_redo.add_do_property(node, property, parsed_value)
@@ -315,6 +352,122 @@ func _get_node_properties(params: Dictionary) -> Dictionary:
 		"type": node.get_class(),
 		"properties": props,
 	})
+
+
+func _get_editor_selection(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var selection := EditorInterface.get_selection()
+	var include_top_only: bool = optional_bool(params, "top_only", false)
+	var selected_nodes: Array = selection.get_top_selected_nodes() if include_top_only else selection.get_selected_nodes()
+
+	return success({
+		"nodes": _serialize_selection_nodes(root, selected_nodes),
+		"count": selected_nodes.size(),
+		"top_only": include_top_only,
+	})
+
+
+func _select_nodes(params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var node_paths_result := _get_selection_node_paths(params)
+	if node_paths_result[1] != null:
+		return node_paths_result[1]
+	var node_paths: Array = node_paths_result[0]
+
+	var mode: String = optional_string(params, "mode", "replace")
+	if mode != "replace" and mode != "add" and mode != "remove":
+		return error_invalid_params("mode must be one of: replace, add, remove")
+
+	var inspect: bool = optional_bool(params, "inspect", true)
+	var focus: bool = optional_bool(params, "focus", inspect)
+	var inspector_only: bool = optional_bool(params, "inspector_only", false)
+	var for_property: String = optional_string(params, "for_property", "")
+
+	var resolved_nodes: Array[Node] = []
+	for node_path_variant: Variant in node_paths:
+		var node_path := str(node_path_variant)
+		if node_path.is_empty():
+			return error_invalid_params("node_paths cannot contain empty values")
+		var node := find_node_by_path(node_path)
+		if node == null:
+			return error_not_found("Node '%s'" % node_path, "Use get_scene_tree to see available nodes")
+		resolved_nodes.append(node)
+
+	var selection := EditorInterface.get_selection()
+	if mode == "replace":
+		selection.clear()
+
+	for node: Node in resolved_nodes:
+		if mode == "remove":
+			selection.remove_node(node)
+		else:
+			selection.add_node(node)
+
+	# edit_node() and inspect_object() both reset EditorSelection to a single
+	# node, which would collapse a multi-node selection down to the last node.
+	# Only focus/inspect when exactly one node was selected.
+	if mode != "remove" and resolved_nodes.size() == 1:
+		var edited_node: Node = resolved_nodes[0]
+		if focus:
+			EditorInterface.edit_node(edited_node)
+		if inspect:
+			EditorInterface.inspect_object(edited_node, for_property, inspector_only)
+
+	var selected_nodes: Array = selection.get_selected_nodes()
+	return success({
+		"mode": mode,
+		"selected": _serialize_selection_nodes(root, selected_nodes),
+		"count": selected_nodes.size(),
+	})
+
+
+func _clear_editor_selection(_params: Dictionary) -> Dictionary:
+	var root := get_edited_root()
+	if root == null:
+		return error_no_scene()
+
+	var selection := EditorInterface.get_selection()
+	var before_count := selection.get_selected_nodes().size()
+	selection.clear()
+
+	return success({
+		"cleared": before_count,
+		"selected": [],
+		"count": 0,
+	})
+
+
+func _get_selection_node_paths(params: Dictionary) -> Array:
+	if params.has("node_paths"):
+		if not params["node_paths"] is Array:
+			return [[], error_invalid_params("node_paths must be an array of node paths")]
+		return [params["node_paths"], null]
+
+	var result := require_string(params, "node_path")
+	if result[1] != null:
+		return [[], result[1]]
+	return [[result[0]], null]
+
+
+func _serialize_selection_nodes(root: Node, nodes: Array) -> Array:
+	var serialized: Array = []
+	for node: Node in nodes:
+		if node == null:
+			continue
+		if node != root and not root.is_ancestor_of(node):
+			continue
+		serialized.append({
+			"name": node.name,
+			"path": str(root.get_path_to(node)) if node != root else ".",
+			"type": node.get_class(),
+		})
+	return serialized
 
 
 func _add_resource(params: Dictionary) -> Dictionary:
@@ -523,10 +676,18 @@ func _connect_signal(params: Dictionary) -> Dictionary:
 	if source.is_connected(signal_name, Callable(target, method_name)):
 		return success({"already_connected": true, "signal": signal_name})
 
+	# CONNECT_PERSIST is required for PackedScene.pack() to serialize the
+	# connection into the .tscn — without it the connection is editor-memory only.
+	var flags: int = Object.CONNECT_PERSIST
+	if optional_bool(params, "deferred", false):
+		flags |= Object.CONNECT_DEFERRED
+	if optional_bool(params, "one_shot", false):
+		flags |= Object.CONNECT_ONE_SHOT
+
 	var callable := Callable(target, method_name)
 	var undo_redo := get_undo_redo()
 	undo_redo.create_action("MCP: Connect signal")
-	undo_redo.add_do_method(source, "connect", signal_name, callable)
+	undo_redo.add_do_method(source, "connect", signal_name, callable, flags)
 	undo_redo.add_undo_method(source, "disconnect", signal_name, callable)
 	undo_redo.commit_action()
 
@@ -536,6 +697,8 @@ func _connect_signal(params: Dictionary) -> Dictionary:
 		"target": str(root.get_path_to(target)),
 		"method": method_name,
 		"connected": true,
+		"flags": flags,
+		"persistent": true,
 	})
 
 

@@ -53,16 +53,16 @@ func _setup_navigation_region(params: Dictionary) -> Dictionary:
 		region.name = optional_string(params, "name", "NavigationRegion3D")
 
 		var nav_mesh := NavigationMesh.new()
-		nav_mesh.agent_radius = float(params.get("agent_radius", 0.5))
-		nav_mesh.agent_height = float(params.get("agent_height", 1.5))
-		nav_mesh.agent_max_climb = float(params.get("agent_max_climb", 0.25))
-		nav_mesh.agent_max_slope = float(params.get("agent_max_slope", 45.0))
-		nav_mesh.cell_size = float(params.get("cell_size", 0.25))
-		nav_mesh.cell_height = float(params.get("cell_height", 0.25))
+		nav_mesh.agent_radius = optional_float(params, "agent_radius", 0.5)
+		nav_mesh.agent_height = optional_float(params, "agent_height", 1.5)
+		nav_mesh.agent_max_climb = optional_float(params, "agent_max_climb", 0.25)
+		nav_mesh.agent_max_slope = optional_float(params, "agent_max_slope", 45.0)
+		nav_mesh.cell_size = optional_float(params, "cell_size", 0.25)
+		nav_mesh.cell_height = optional_float(params, "cell_height", 0.25)
 		region.navigation_mesh = nav_mesh
 
 		if params.has("navigation_layers"):
-			region.navigation_layers = int(params["navigation_layers"])
+			region.navigation_layers = optional_int(params, "navigation_layers")
 
 		add_child_with_undo(node, region, root, "MCP: Add NavigationRegion3D")
 
@@ -89,15 +89,15 @@ func _setup_navigation_region(params: Dictionary) -> Dictionary:
 				"groups_explicit": nav_poly.source_geometry_mode = NavigationPolygon.SOURCE_GEOMETRY_GROUPS_EXPLICIT
 
 		if params.has("cell_size"):
-			nav_poly.cell_size = float(params["cell_size"])
+			nav_poly.cell_size = optional_float(params, "cell_size")
 
 		if params.has("agent_radius"):
-			nav_poly.agent_radius = float(params["agent_radius"])
+			nav_poly.agent_radius = optional_float(params, "agent_radius")
 
 		region.navigation_polygon = nav_poly
 
 		if params.has("navigation_layers"):
-			region.navigation_layers = int(params["navigation_layers"])
+			region.navigation_layers = optional_int(params, "navigation_layers")
 
 		add_child_with_undo(node, region, root, "MCP: Add NavigationRegion2D")
 
@@ -205,21 +205,21 @@ func _setup_navigation_agent(params: Dictionary) -> Dictionary:
 		agent.name = agent_name
 
 		if params.has("path_desired_distance"):
-			agent.path_desired_distance = float(params["path_desired_distance"])
+			agent.path_desired_distance = optional_float(params, "path_desired_distance")
 		if params.has("target_desired_distance"):
-			agent.target_desired_distance = float(params["target_desired_distance"])
+			agent.target_desired_distance = optional_float(params, "target_desired_distance")
 		if params.has("radius"):
-			agent.radius = float(params["radius"])
+			agent.radius = optional_float(params, "radius")
 		if params.has("neighbor_distance"):
-			agent.neighbor_distance = float(params["neighbor_distance"])
+			agent.neighbor_distance = optional_float(params, "neighbor_distance")
 		if params.has("max_neighbors"):
-			agent.max_neighbors = int(params["max_neighbors"])
+			agent.max_neighbors = optional_int(params, "max_neighbors")
 		if params.has("max_speed"):
-			agent.max_speed = float(params["max_speed"])
+			agent.max_speed = optional_float(params, "max_speed")
 		if params.has("avoidance_enabled"):
-			agent.avoidance_enabled = bool(params["avoidance_enabled"])
+			agent.avoidance_enabled = optional_bool(params, "avoidance_enabled")
 		if params.has("navigation_layers"):
-			agent.navigation_layers = int(params["navigation_layers"])
+			agent.navigation_layers = optional_int(params, "navigation_layers")
 
 		add_child_with_undo(node, agent, root, "MCP: Add NavigationAgent3D")
 
@@ -237,21 +237,21 @@ func _setup_navigation_agent(params: Dictionary) -> Dictionary:
 		agent.name = agent_name
 
 		if params.has("path_desired_distance"):
-			agent.path_desired_distance = float(params["path_desired_distance"])
+			agent.path_desired_distance = optional_float(params, "path_desired_distance")
 		if params.has("target_desired_distance"):
-			agent.target_desired_distance = float(params["target_desired_distance"])
+			agent.target_desired_distance = optional_float(params, "target_desired_distance")
 		if params.has("radius"):
-			agent.radius = float(params["radius"])
+			agent.radius = optional_float(params, "radius")
 		if params.has("neighbor_distance"):
-			agent.neighbor_distance = float(params["neighbor_distance"])
+			agent.neighbor_distance = optional_float(params, "neighbor_distance")
 		if params.has("max_neighbors"):
-			agent.max_neighbors = int(params["max_neighbors"])
+			agent.max_neighbors = optional_int(params, "max_neighbors")
 		if params.has("max_speed"):
-			agent.max_speed = float(params["max_speed"])
+			agent.max_speed = optional_float(params, "max_speed")
 		if params.has("avoidance_enabled"):
-			agent.avoidance_enabled = bool(params["avoidance_enabled"])
+			agent.avoidance_enabled = optional_bool(params, "avoidance_enabled")
 		if params.has("navigation_layers"):
-			agent.navigation_layers = int(params["navigation_layers"])
+			agent.navigation_layers = optional_int(params, "navigation_layers")
 
 		add_child_with_undo(node, agent, root, "MCP: Add NavigationAgent2D")
 
@@ -278,7 +278,7 @@ func _set_navigation_layers(params: Dictionary) -> Dictionary:
 
 	# Support setting by bitmask value
 	if params.has("layers"):
-		var layers_val: int = int(params["layers"])
+		var layers_val: int = optional_int(params, "layers")
 		if node is NavigationRegion2D:
 			set_property_with_undo(node, "navigation_layers", layers_val, "MCP: Set navigation layers")
 		elif node is NavigationRegion3D:

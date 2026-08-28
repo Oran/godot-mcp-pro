@@ -93,17 +93,17 @@ func _add_audio_bus(params: Dictionary) -> Dictionary:
 	AudioServer.set_bus_name(idx, bus_name)
 
 	if params.has("volume_db"):
-		AudioServer.set_bus_volume_db(idx, float(params["volume_db"]))
+		AudioServer.set_bus_volume_db(idx, optional_float(params, "volume_db"))
 
 	var send: String = optional_string(params, "send", "")
 	if not send.is_empty():
 		AudioServer.set_bus_send(idx, send)
 
 	if params.has("solo"):
-		AudioServer.set_bus_solo(idx, bool(params["solo"]))
+		AudioServer.set_bus_solo(idx, optional_bool(params, "solo"))
 
 	if params.has("mute"):
-		AudioServer.set_bus_mute(idx, bool(params["mute"]))
+		AudioServer.set_bus_mute(idx, optional_bool(params, "mute"))
 
 	return success({"name": bus_name, "index": idx, "bus_count": AudioServer.bus_count})
 
@@ -121,19 +121,19 @@ func _set_audio_bus(params: Dictionary) -> Dictionary:
 	var changes := 0
 
 	if params.has("volume_db"):
-		AudioServer.set_bus_volume_db(idx, float(params["volume_db"]))
+		AudioServer.set_bus_volume_db(idx, optional_float(params, "volume_db"))
 		changes += 1
 
 	if params.has("solo"):
-		AudioServer.set_bus_solo(idx, bool(params["solo"]))
+		AudioServer.set_bus_solo(idx, optional_bool(params, "solo"))
 		changes += 1
 
 	if params.has("mute"):
-		AudioServer.set_bus_mute(idx, bool(params["mute"]))
+		AudioServer.set_bus_mute(idx, optional_bool(params, "mute"))
 		changes += 1
 
 	if params.has("bypass_effects"):
-		AudioServer.set_bus_bypass_effects(idx, bool(params["bypass_effects"]))
+		AudioServer.set_bus_bypass_effects(idx, optional_bool(params, "bypass_effects"))
 		changes += 1
 
 	var send: String = optional_string(params, "send", "")
@@ -347,30 +347,30 @@ func _add_audio_player(params: Dictionary) -> Dictionary:
 
 	# Common properties
 	if params.has("volume_db"):
-		player.set("volume_db", float(params["volume_db"]))
+		player.set("volume_db", optional_float(params, "volume_db"))
 
 	var bus: String = optional_string(params, "bus", "")
 	if not bus.is_empty():
 		player.set("bus", bus)
 
 	if params.has("autoplay"):
-		player.set("autoplay", bool(params["autoplay"]))
+		player.set("autoplay", optional_bool(params, "autoplay"))
 
 	# 2D-specific properties
 	if player is AudioStreamPlayer2D:
 		if params.has("max_distance"):
-			(player as AudioStreamPlayer2D).max_distance = float(params["max_distance"])
+			(player as AudioStreamPlayer2D).max_distance = optional_float(params, "max_distance")
 		if params.has("attenuation"):
-			(player as AudioStreamPlayer2D).attenuation = float(params["attenuation"])
+			(player as AudioStreamPlayer2D).attenuation = optional_float(params, "attenuation")
 
 	# 3D-specific properties
 	if player is AudioStreamPlayer3D:
 		if params.has("max_distance"):
-			(player as AudioStreamPlayer3D).max_distance = float(params["max_distance"])
+			(player as AudioStreamPlayer3D).max_distance = optional_float(params, "max_distance")
 		if params.has("attenuation_model"):
-			(player as AudioStreamPlayer3D).attenuation_model = int(params["attenuation_model"]) as AudioStreamPlayer3D.AttenuationModel
+			(player as AudioStreamPlayer3D).attenuation_model = optional_int(params, "attenuation_model") as AudioStreamPlayer3D.AttenuationModel
 		if params.has("unit_size"):
-			(player as AudioStreamPlayer3D).unit_size = float(params["unit_size"])
+			(player as AudioStreamPlayer3D).unit_size = optional_float(params, "unit_size")
 
 	add_child_with_undo(parent, player, root, "MCP: Add audio player")
 
